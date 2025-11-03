@@ -55,11 +55,14 @@ Serve a peer-to-peer application from the current directory.
 
 **Usage:**
 ```bash
-./ipfs-webapp serve [--noopen] [-v | -vv | -vvv]
+./ipfs-webapp serve [--noopen] [-p PORT] [-v | -vv | -vvv]
 ```
 
 **Flags:**
 - `--noopen`: Do not open browser automatically
+- `-p, --port PORT`: Specify port to listen on (default: auto-select starting from 10000)
+  - If the specified port is unavailable, automatically tries the next port (up to 100 attempts)
+  - Example: `./ipfs-webapp serve -p 8080`
 - `-v, --verbose`: Verbose output (can be specified multiple times)
   - `-v`: Log peer creation, connections, and messages
   - `-vv`: Additional debug information
@@ -67,9 +70,11 @@ Serve a peer-to-peer application from the current directory.
 
 This will:
 1. Initialize an IPFS node with persistent peer ID
-2. Start HTTP server on random port
+2. Start HTTP server on specified port (or auto-select starting from 10000) with SPA routing support
 3. Open default browser to the application (unless --noopen is specified)
 4. Expose WebSocket endpoint at `/ws`
+
+**SPA Routing**: The server automatically handles client-side routing by serving `index.html` for routes without file extensions while preserving the URL path. Real files are served normally, and missing files with extensions return 404.
 
 ### `demo`
 

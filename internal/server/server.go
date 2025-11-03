@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sync"
 
@@ -51,17 +53,13 @@ func NewServer(ctx context.Context, pm *peer.Manager, htmlDir string, port int) 
 
 // Start starts the HTTP server
 func (s *Server) Start() error {
-	// If port is 0, find random available port
-	if s.port == 0 {
-		listener, err := net.Listen("tcp", ":0")
-		if err != nil {
-			return fmt.Errorf("failed to find available port: %w", err)
-		}
-		s.port = listener.Addr().(*net.TCPAddr).Port
-		listener.Close()
+	// Determine starting port
+	startPort := s.port
+	if startPort == 0 {
+		startPort = 10000
 	}
 
-	// Create HTTP server
+	// Create HTTP server mux
 	mux := http.NewServeMux()
 
 	// WebSocket endpoint
@@ -69,18 +67,34 @@ func (s *Server) Start() error {
 		s.handleWebSocket(w, r)
 	})
 
-	// Static file server
-	fs := http.FileServer(http.Dir(s.htmlDir))
-	mux.Handle("/", fs)
+	// Static file server with SPA routing fallback
+	mux.Handle("/", s.spaHandler(http.Dir(s.htmlDir)))
+
+	// Try to find an available port
+	var listener net.Listener
+	var err error
+	maxAttempts := 100
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		port := startPort + attempt
+		listener, err = net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err == nil {
+			s.port = port
+			break
+		}
+	}
+
+	if listener == nil {
+		return fmt.Errorf("failed to find available port starting from %d", startPort)
+	}
 
 	s.httpServer = &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.port),
 		Handler: mux,
 	}
 
-	// Start server in goroutine
+	// Start server in goroutine with the listener
 	go func() {
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("HTTP server error: %v\n", err)
 		}
 	}()
@@ -141,6 +155,57 @@ func (s *Server) OpenBrowser() error {
 	}
 
 	return cmd.Start()
+}
+
+// spaHandler wraps http.FileServer to provide SPA routing fallback
+// For SPA routes (no file extension, file doesn't exist), serve index.html
+// while preserving the URL path for client-side routing
+func (s *Server) spaHandler(fs http.FileSystem) http.Handler {
+	fileServer := http.FileServer(fs)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Try to open the file
+		f, err := fs.Open(path)
+		if err == nil {
+			// File exists, serve it normally
+			f.Close()
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// File doesn't exist - check if it looks like a SPA route
+		ext := filepath.Ext(path)
+
+		// If path has an extension, it's probably a real file request = real 404
+		if ext != "" && ext != ".html" {
+			http.NotFound(w, r)
+			return
+		}
+
+		// No extension or .html extension - likely a SPA route
+		// Serve index.html content directly (preserves URL for client-side routing)
+		indexPath := "/index.html"
+		indexFile, err := fs.Open(indexPath)
+		if err != nil {
+			// index.html doesn't exist, return 404
+			http.NotFound(w, r)
+			return
+		}
+		defer indexFile.Close()
+
+		// Get file info for modification time
+		indexInfo, err := indexFile.Stat()
+		if err != nil {
+			http.Error(w, "Failed to stat index.html", http.StatusInternalServerError)
+			return
+		}
+
+		// Serve the content directly without changing the URL
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		http.ServeContent(w, r, "index.html", indexInfo.ModTime(), indexFile.(io.ReadSeeker))
+	})
 }
 
 // handleWebSocket handles WebSocket connections

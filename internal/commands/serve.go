@@ -17,6 +17,7 @@ import (
 var (
 	noOpen   bool
 	verbose  int
+	port     int
 )
 
 // ServeCmd represents the serve command
@@ -34,6 +35,7 @@ The current directory must contain:
 func init() {
 	ServeCmd.Flags().BoolVar(&noOpen, "noopen", false, "Do not open browser automatically")
 	ServeCmd.Flags().CountVarP(&verbose, "verbose", "v", "Verbose output (can be specified multiple times: -v, -vv, -vvv)")
+	ServeCmd.Flags().IntVarP(&port, "port", "p", 0, "Port to listen on (default: auto-select starting from 10000)")
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -63,7 +65,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create HTTP server
 	htmlDir := "html"
-	srv := server.NewServer(ctx, peerManager, htmlDir, 0) // Random port
+	srv := server.NewServer(ctx, peerManager, htmlDir, port)
 
 	// Start server
 	if err := srv.Start(); err != nil {

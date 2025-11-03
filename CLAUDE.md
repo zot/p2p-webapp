@@ -23,11 +23,16 @@ make clean
 
 ## 🧪 Testing with Playwright
 When testing with Playwright MCP:
-1. **Always use an empty tmp directory** for the demo command
+1. **ALWAYS check for running instances BEFORE starting tests**
+   ```bash
+   pgrep -a ipfs-webapp  # Check for any running instances
+   kill -9 <PID>         # Kill if found
+   ```
+2. **Always use an empty tmp directory** for the demo command
    ```bash
    cd /tmp/ipfs-demo-test && rm -rf * && /path/to/ipfs-webapp demo --noopen -v
    ```
-2. **Track and kill processes properly**
+3. **Track and kill processes properly**
    - **IMPORTANT**: DO NOT use `ps aux | grep ipfs-webapp` to find the PID!
      - This grep pattern will match BOTH the ipfs-webapp binary AND the Claude process
      - The Claude process command line contains the working directory path which includes "ipfs-webapp"
@@ -59,6 +64,9 @@ The build process:
   - the demo (`internal/commands/demo/index.html`) demonstrates how to use the library
   - users can get the library from the demo directory after building
 - implements a web server to launch a site on a random port on localhost
+  - **SPA routing support**: automatically serves `index.html` for routes without file extensions
+  - preserves URL path for client-side routing (e.g., `/settings`, `/adventure/world/123`)
+  - real files (with extensions) served normally or return 404 if not found
 - uses [ipfs-lite](https://github.com/hsanjuan/ipfs-lite) to manage the IPFS connection
 - manages peers for browser connections
 - commands
@@ -76,6 +84,9 @@ The build process:
       - -v, --verbose: verbose output (can be specified multiple times: -v, -vv, -vvv)
         - level 1: log peer creation, connections, and messages
         - level 2+: additional debug information
+      - -p, --port PORT: specify port to listen on (default: auto-select starting from 10000)
+        - if port not available, automatically tries the next port (up to 100 attempts)
+        - example: `./ipfs-webapp serve -p 8080`
   - demo
     - current dir must be empty
     - copies an embedded chatroom example into a directory and serves it
@@ -225,3 +236,18 @@ The TypeScript client library implements robust message handling with proper ord
 - `peerData(peer, protocol, data)`: Route to protocol listener
 - `send(peer, protocol, data)`: Validate protocol started, send message
 - `stop(protocol)`: Remove listener, disable sending
+
+### SPA Routing Support
+The server implements automatic SPA (Single Page Application) routing fallback:
+- **Route detection**: Paths without file extensions are treated as SPA routes
+- **Fallback behavior**: Non-existent routes serve `index.html` while preserving the URL
+- **File serving**: Real files (with extensions) are served normally
+- **404 handling**: Missing files with extensions return proper 404 errors
+- **Implementation**: `internal/server/server.go:spaHandler()`
+
+Examples:
+- `/` → serves `html/index.html`
+- `/settings` → serves `html/index.html` (URL stays `/settings`)
+- `/adventure/world/123` → serves `html/index.html` (URL stays `/adventure/world/123`)
+- `/main.js` → serves `html/main.js` (actual file)
+- `/nonexistent.js` → returns 404 (file with extension not found)
