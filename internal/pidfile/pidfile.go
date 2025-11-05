@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/shirou/gopsutil/v3/process"
 )
@@ -37,10 +36,10 @@ func withLockedFile(flags int, fn func(*os.File, []int32) error) error {
 	defer file.Close()
 
 	// Lock the file
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("failed to lock file: %w", err)
+	if err := lockFile(file); err != nil {
+		return err
 	}
-	defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	defer unlockFile(file)
 
 	// Read current PIDs
 	var pids []int32

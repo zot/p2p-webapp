@@ -1,4 +1,4 @@
-.PHONY: all build client demo clean deps test
+.PHONY: all build client demo clean deps test release
 
 # Default target
 all: build
@@ -25,9 +25,9 @@ client: deps
 	find internal/commands/demo -name '#*' -type f -delete
 	@echo "Client library built and copied successfully"
 
-# Build Go application (depends on client)
+# Build Go application for current platform (depends on client)
 build: client
-	@echo "Building Go application..."
+	@echo "Building Go application for current platform..."
 	go build -o p2p-webapp-temp ./cmd/p2p-webapp
 	@echo "Preparing demo site for bundling..."
 	@bash scripts/prepare-demo.sh
@@ -53,3 +53,33 @@ clean:
 # Run tests
 test:
 	go test ./...
+
+# Build release binaries for all platforms
+release: client
+	@echo "Building release binaries for all platforms..."
+	@mkdir -p build/release
+	@echo "Preparing demo site..."
+	@bash scripts/prepare-demo.sh
+	@echo ""
+	@echo "Building platform binaries..."
+	@GOOS=linux GOARCH=amd64 go build -o build/release/p2p-webapp-linux-amd64-temp ./cmd/p2p-webapp
+	@echo "  ✓ Linux amd64"
+	@GOOS=windows GOARCH=amd64 go build -o build/release/p2p-webapp-windows-amd64-temp.exe ./cmd/p2p-webapp
+	@echo "  ✓ Windows amd64"
+	@GOOS=darwin GOARCH=amd64 go build -o build/release/p2p-webapp-darwin-amd64-temp ./cmd/p2p-webapp
+	@echo "  ✓ macOS amd64 (Intel)"
+	@GOOS=darwin GOARCH=arm64 go build -o build/release/p2p-webapp-darwin-arm64-temp ./cmd/p2p-webapp
+	@echo "  ✓ macOS arm64 (Apple Silicon)"
+	@echo ""
+	@echo "Bundling demo into binaries..."
+	@go run scripts/bundle-all-platforms.go build/release/p2p-webapp-linux-amd64-temp build/demo-staging build/release/p2p-webapp-linux-amd64
+	@go run scripts/bundle-all-platforms.go build/release/p2p-webapp-windows-amd64-temp.exe build/demo-staging build/release/p2p-webapp-windows-amd64.exe
+	@go run scripts/bundle-all-platforms.go build/release/p2p-webapp-darwin-amd64-temp build/demo-staging build/release/p2p-webapp-darwin-amd64
+	@go run scripts/bundle-all-platforms.go build/release/p2p-webapp-darwin-arm64-temp build/demo-staging build/release/p2p-webapp-darwin-arm64
+	@echo ""
+	@echo "Cleaning up temporary files..."
+	@rm -f build/release/*-temp build/release/*-temp.exe
+	@rm -rf build/demo-staging
+	@echo ""
+	@echo "Release binaries ready in build/release/:"
+	@ls -lh build/release/ | tail -n +2 | awk '{printf "  %s (%s)\n", $$9, $$5}'

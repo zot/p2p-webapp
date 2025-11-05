@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -41,13 +42,16 @@ type zipFileSystem struct {
 // Open implements http.FileSystem interface
 func (zfs *zipFileSystem) Open(name string) (http.File, error) {
 	// Clean the path and remove leading slash
-	name = strings.TrimPrefix(filepath.Clean(name), "/")
+	// Use path.Clean (not filepath.Clean) to ensure forward slashes on all platforms
+	// ZIP files always use forward slashes, even on Windows
+	name = strings.TrimPrefix(path.Clean(name), "/")
 	if name == "." {
 		name = ""
 	}
 
 	// Build target path in ZIP (all files are under html/ prefix)
-	targetPath := "html/" + name
+	// Use path.Join to ensure forward slashes
+	targetPath := path.Join("html", name)
 
 	// Find and return the file from ZIP
 	for _, f := range zfs.reader.File {
