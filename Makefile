@@ -55,7 +55,7 @@ test:
 	go test ./...
 
 # Build release binaries for all platforms
-release: client
+release: build
 	@echo "Building release binaries for all platforms..."
 	@mkdir -p build/release
 	@echo "Preparing demo site..."
