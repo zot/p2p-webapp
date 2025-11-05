@@ -79,123 +79,149 @@ The build process:
   - real files (with extensions) served normally or return 404 if not found
 - uses [ipfs-lite](https://github.com/hsanjuan/ipfs-lite) to manage the IPFS connection
 - manages peers for browser connections
-- commands
-  - serve
-    - operates in one of two modes
-      - **default mode** (no --dir flag): serves directly from bundled site without filesystem extraction
-        - requires binary to be bundled (use `bundle` command)
-        - creates `.p2p-webapp-storage` directory in current directory for peer keys
-        - efficient - no extraction needed, serves directly from ZIP
-      - **directory mode** (with --dir flag): serves from filesystem directory
-        - directory must contain these subdirectories
-          - html: website to serve, must contain index.html
-            - launches this in a browser by default
-          - ipfs: content to make available in IPFS (optional)
-          - storage: server storage (peer keys, etc.)
-        - use after extracting with `extract` command
-        - example: `./p2p-webapp serve --dir .`
-    - hosts WebSocket-based JSON-RPC protocol service for the site
-      - use text-based JSON for commands
-      - each side pushes commands to the other
-    - flags
-      - --dir DIR: directory to serve from (if not specified, serves from bundled site)
-      - --noopen: do not open browser automatically
-      - -v, --verbose: verbose output (can be specified multiple times: -v, -vv, -vvv)
-        - level 1: log peer creation, connections, and messages
-        - level 2+: additional debug information
-      - -p, --port PORT: specify port to listen on (default: auto-select starting from 10000)
-        - if port not available, automatically tries the next port (up to 100 attempts)
-        - example: `./p2p-webapp serve -p 8080`
-  - extract
-    - extracts the bundled site from the binary to the current directory
-    - current dir must be empty
-    - extracts html/, ipfs/, and storage/ subdirectories
-    - does NOT start the server - run `p2p-webapp serve --dir .` afterwards to serve
-    - the default bundled site is a chatroom application that demonstrates key features
-      - uses listPeers to discover peers subscribed to the chat topic
-      - displays a list of peers on the right side
-        - first entry: "Chat room" (room chat mode)
-        - remaining entries: individual users
-      - two communication modes indicated at the top of the view
-        - room chat (default)
-          - uses pubsub for group messaging
-          - selected by clicking "Chat room" in the peer list
-        - direct messaging
-          - uses peer-to-peer protocol for private messages
-          - selected by clicking a user in the peer list
-      - demo listener architecture
-        - single protocol listener registered at startup with `start(protocol, onData)`
-        - **room chat**: `subscribe` callback always stores messages via `storeRoomMessage()`
-          - stores messages even when in DM mode (never lost)
-          - only displays messages if currently in room mode
-          - when switching to room mode, `displayStoredRoomMessages()` shows all stored messages
-        - **direct messages**: protocol listener callback receives `(peer, data)` and:
-          - always stores messages via `storeDMMessage(peer, ...)` (never lost)
-          - only displays via `addMessage()` if currently viewing that DM
-        - `switchToDM()` simply switches UI view - no connection management needed
-        - server transparently manages all stream lifecycle and reliability
-  - bundle
-    - creates a standalone binary with a site bundled into it
-    - works with both bundled and unbundled source binaries (replaces existing bundle if present)
-    - no compilation tools needed - works out of the box
-    - usage: `./p2p-webapp bundle [site-directory] -o [output-binary]`
-    - site directory must contain
-      - html/: website files (must contain index.html)
-      - ipfs/: IPFS content (optional)
-      - storage/: storage directory (optional, created if missing)
-    - example: `./p2p-webapp bundle my-site -o my-app`
-    - the output binary can be distributed and will extract/serve the bundled site
-    - uses ZIP append technique - appends ZIP archive + footer to binary
-      - footer contains: magic marker (8 bytes) + offset (8 bytes) + size (8 bytes)
-      - Go binaries can have trailing data without affecting execution
-      - on startup, checks for bundled content and extracts if found
-  - version
-    displays the current version
-  - ls
-    - lists files available in the bundled site
-    - shows files that can be copied with the cp command
-    - usage: `./p2p-webapp ls`
-    - displays file names in a clean list format
-    - useful for discovering what files are available before using cp
-    - reads directly from the bundled content (no extraction needed)
-  - cp
-    - copies files from the bundled site to a target location
-    - supports glob patterns for source selection (e.g., `*.js`, `client.*`)
-    - similar to UNIX cp command but operates on bundled site files
-    - usage: `./p2p-webapp cp SOURCE... DEST`
-      - SOURCE: one or more glob patterns or file names from the bundled site
-      - DEST: destination directory (must exist or will be created)
-    - examples
-      - `./p2p-webapp cp client.js my-project/` - copy single file
-      - `./p2p-webapp cp client.* my-project/` - copy client.js and client.d.ts
-      - `./p2p-webapp cp *.js *.html my-project/` - copy multiple patterns
-    - creates destination directory if it doesn't exist
-    - preserves file names (no renaming)
-    - validates that at least one file matches the patterns
-    - reads directly from the bundled content (no extraction needed)
-    - error handling
-      - fails if no files match the patterns
-      - fails if destination is not a directory (when copying multiple files)
-      - fails if binary is not bundled
-  - ps
-    - lists process IDs for all running p2p-webapp instances
-    - usage: `./p2p-webapp ps`
-    - flags
-      - -v, --verbose: also shows command line arguments for each instance
-    - displays PID and optionally command line args in a clean table format
-    - automatically cleans stale entries from the tracking file
-  - kill
-    - terminates a specific running instance by PID
-    - usage: `./p2p-webapp kill PID`
-    - validates that PID is actually an p2p-webapp instance
-    - removes the instance from the tracking file
-    - returns error if PID is not found or not an p2p-webapp process
-  - killall
-    - terminates all running p2p-webapp instances
-    - usage: `./p2p-webapp killall`
-    - kills all instances tracked in the PID file
-    - automatically validates and cleans up stale entries
-    - reports how many instances were killed
+
+## Peer Discovery
+p2p-webapp uses two complementary discovery mechanisms to find and connect to peers:
+
+### mDNS (Local Discovery)
+- Automatically discovers peers on the same local network
+- Zero configuration - works out of the box on LANs
+- Ideal for local development and same-network collaboration
+- Low latency peer discovery (typically sub-second)
+
+### DHT (Global Discovery)
+- Distributed Hash Table for discovering peers across the internet
+- Enables global peer connectivity beyond local networks
+- Bootstraps using well-known IPFS DHT nodes
+- **Integrated with GossipSub**: peers advertise and discover topic subscriptions via DHT
+- Provides resilient, decentralized peer routing
+
+Both mechanisms work simultaneously and automatically - peers discovered via mDNS are used for fast local connections while DHT provides global reach.
+
+### NAT Traversal
+For peers behind NATs/firewalls (typical for home networks):
+- **Circuit Relay v2**: enables connections via relay servers when direct connection isn't possible
+- **Hole Punching**: attempts direct NAT traversal when both peers support it
+- **AutoRelay**: automatically finds and uses public relay nodes from the IPFS network
+- **NAT Port Mapping**: attempts UPnP/NAT-PMP for automatic port forwarding
+
+## Commands
+- **serve**
+  - operates in one of two modes
+    - **default mode** (no --dir flag): serves directly from bundled site without filesystem extraction
+      - requires binary to be bundled (use `bundle` command)
+      - creates `.p2p-webapp-storage` directory in current directory for peer keys
+      - efficient - no extraction needed, serves directly from ZIP
+    - **directory mode** (with --dir flag): serves from filesystem directory
+      - directory must contain these subdirectories
+        - html: website to serve, must contain index.html
+          - launches this in a browser by default
+        - ipfs: content to make available in IPFS (optional)
+        - storage: server storage (peer keys, etc.)
+      - use after extracting with `extract` command
+      - example: `./p2p-webapp serve --dir .`
+  - hosts WebSocket-based JSON-RPC protocol service for the site
+    - use text-based JSON for commands
+    - each side pushes commands to the other
+  - flags
+    - --dir DIR: directory to serve from (if not specified, serves from bundled site)
+    - --noopen: do not open browser automatically
+    - -v, --verbose: verbose output (can be specified multiple times: -v, -vv, -vvv)
+      - level 1: log peer creation, connections, and messages
+      - level 2+: additional debug information
+    - -p, --port PORT: specify port to listen on (default: auto-select starting from 10000)
+      - if port not available, automatically tries the next port (up to 100 attempts)
+      - example: `./p2p-webapp serve -p 8080`
+- **extract**
+  - extracts the bundled site from the binary to the current directory
+  - current dir must be empty
+  - extracts html/, ipfs/, and storage/ subdirectories
+  - does NOT start the server - run `p2p-webapp serve --dir .` afterwards to serve
+  - the default bundled site is a chatroom application that demonstrates key features
+    - uses listPeers to discover peers subscribed to the chat topic
+    - displays a list of peers on the right side
+      - first entry: "Chat room" (room chat mode)
+      - remaining entries: individual users
+    - two communication modes indicated at the top of the view
+      - room chat (default)
+        - uses pubsub for group messaging
+        - selected by clicking "Chat room" in the peer list
+      - direct messaging
+        - uses peer-to-peer protocol for private messages
+        - selected by clicking a user in the peer list
+    - demo listener architecture
+      - single protocol listener registered at startup with `start(protocol, onData)`
+      - **room chat**: `subscribe` callback always stores messages via `storeRoomMessage()`
+        - stores messages even when in DM mode (never lost)
+        - only displays messages if currently in room mode
+        - when switching to room mode, `displayStoredRoomMessages()` shows all stored messages
+      - **direct messages**: protocol listener callback receives `(peer, data)` and:
+        - always stores messages via `storeDMMessage(peer, ...)` (never lost)
+        - only displays via `addMessage()` if currently viewing that DM
+      - `switchToDM()` simply switches UI view - no connection management needed
+      - server transparently manages all stream lifecycle and reliability
+- **bundle**
+  - creates a standalone binary with a site bundled into it
+  - works with both bundled and unbundled source binaries (replaces existing bundle if present)
+  - no compilation tools needed - works out of the box
+  - usage: `./p2p-webapp bundle [site-directory] -o [output-binary]`
+  - site directory must contain
+    - html/: website files (must contain index.html)
+    - ipfs/: IPFS content (optional)
+    - storage/: storage directory (optional, created if missing)
+  - example: `./p2p-webapp bundle my-site -o my-app`
+  - the output binary can be distributed and will extract/serve the bundled site
+  - uses ZIP append technique - appends ZIP archive + footer to binary
+    - footer contains: magic marker (8 bytes) + offset (8 bytes) + size (8 bytes)
+    - Go binaries can have trailing data without affecting execution
+    - on startup, checks for bundled content and extracts if found
+- **version**
+  - displays the current version
+- **ls**
+  - lists files available in the bundled site
+  - shows files that can be copied with the cp command
+  - usage: `./p2p-webapp ls`
+  - displays file names in a clean list format
+  - useful for discovering what files are available before using cp
+  - reads directly from the bundled content (no extraction needed)
+- **cp**
+  - copies files from the bundled site to a target location
+  - supports glob patterns for source selection (e.g., `*.js`, `client.*`)
+  - similar to UNIX cp command but operates on bundled site files
+  - usage: `./p2p-webapp cp SOURCE... DEST`
+    - SOURCE: one or more glob patterns or file names from the bundled site
+    - DEST: destination directory (must exist or will be created)
+  - examples
+    - `./p2p-webapp cp client.js my-project/` - copy single file
+    - `./p2p-webapp cp client.* my-project/` - copy client.js and client.d.ts
+    - `./p2p-webapp cp *.js *.html my-project/` - copy multiple patterns
+  - creates destination directory if it doesn't exist
+  - preserves file names (no renaming)
+  - validates that at least one file matches the patterns
+  - reads directly from the bundled content (no extraction needed)
+  - error handling
+    - fails if no files match the patterns
+    - fails if destination is not a directory (when copying multiple files)
+    - fails if binary is not bundled
+- **ps**
+  - lists process IDs for all running p2p-webapp instances
+  - usage: `./p2p-webapp ps`
+  - flags
+    - -v, --verbose: also shows command line arguments for each instance
+  - displays PID and optionally command line args in a clean table format
+  - automatically cleans stale entries from the tracking file
+- **kill**
+  - terminates a specific running instance by PID
+  - usage: `./p2p-webapp kill PID`
+  - validates that PID is actually an p2p-webapp instance
+  - removes the instance from the tracking file
+  - returns error if PID is not found or not an p2p-webapp process
+- **killall**
+  - terminates all running p2p-webapp instances
+  - usage: `./p2p-webapp killall`
+  - kills all instances tracked in the PID file
+  - automatically validates and cleans up stale entries
+  - reports how many instances were killed
 
 ## Process Tracking
 p2p-webapp maintains a JSON list of running instance PIDs for process management:

@@ -39,3 +39,4 @@ package-lock.json
 # Keep demo files in repo
 !internal/commands/demo/
 /.playwright-mcp/
+/build/

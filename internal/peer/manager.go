@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/control"
@@ -18,6 +19,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p/core/routing"
+	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
+	discoveryrouting "github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -39,6 +43,8 @@ type Peer struct {
 	ctx              context.Context
 	host             host.Host
 	pubsub           *pubsub.PubSub
+	dht              *dht.IpfsDHT
+	mdnsService      mdns.Service
 	peerID           peer.ID
 	alias            string
 	mu               sync.RWMutex
@@ -78,6 +84,17 @@ type TopicHandler struct {
 	Subscription *pubsub.Subscription
 	ctx          context.Context
 	cancel       context.CancelFunc
+}
+
+// discoveryNotifee gets notified when we find a new peer via mDNS discovery
+type discoveryNotifee struct {
+	h host.Host
+}
+
+// HandlePeerFound connects to peers discovered via mDNS
+func (n *discoveryNotifee) HandlePeerFound(pi peer.AddrInfo) {
+	// Try to connect to the discovered peer (best effort)
+	_ = n.h.Connect(context.Background(), pi)
 }
 
 // NewManager creates a new peer manager
@@ -216,21 +233,76 @@ func (m *Manager) CreatePeer(requestedPeerKey string) (peerID string, peerKey st
 	}
 	encodedKey := crypto.ConfigEncodeKey(keyBytes)
 
+	// Variable to store DHT reference
+	var kdht *dht.IpfsDHT
+
 	// Create libp2p host
 	h, err := libp2p.New(
 		libp2p.Identity(priv),
 		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"), // Random port
 		libp2p.ConnectionGater(&allowPrivateGater{}),   // Allow private/local addresses
-		libp2p.DisableRelay(),                           // Simplify for local dev
-		libp2p.NATPortMap(),                             // Allow NAT traversal
+		libp2p.EnableRelay(),                            // Enable relay for NAT traversal
+		libp2p.EnableAutoRelayWithStaticRelays([]peer.AddrInfo{}), // Use public relays
+		libp2p.NATPortMap(),                             // Try NAT port mapping
+		libp2p.EnableNATService(),                       // Help other peers with NAT detection
+		libp2p.EnableHolePunching(),                     // Enable hole punching for direct connections
+		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
+			// Create DHT for global discovery
+			var err error
+			kdht, err = dht.New(m.ctx, h, dht.Mode(dht.ModeAutoServer))
+			return kdht, err
+		}),
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create host: %w", err)
 	}
 
-	// Create pubsub
-	ps, err := pubsub.NewGossipSub(m.ctx, h)
+	// Bootstrap DHT with IPFS nodes for global discovery
+	if kdht != nil {
+		bootstrapPeers := dht.GetDefaultBootstrapPeerAddrInfos()
+		connected := 0
+		for _, peerinfo := range bootstrapPeers {
+			if err := h.Connect(m.ctx, peerinfo); err == nil {
+				connected++
+			}
+			// Stop after connecting to 3 bootstrap nodes (sufficient for DHT)
+			if connected >= 3 {
+				break
+			}
+		}
+		if err := kdht.Bootstrap(m.ctx); err != nil {
+			// Log but don't fail - DHT will continue trying to bootstrap
+			if m.verbosity >= 1 {
+				fmt.Printf("DHT bootstrap warning: %v\n", err)
+			}
+		}
+	}
+
+	// Setup mDNS for local discovery
+	mdnsService := mdns.NewMdnsService(h, "p2p-webapp", &discoveryNotifee{h: h})
+	if err := mdnsService.Start(); err != nil {
+		if kdht != nil {
+			kdht.Close()
+		}
+		h.Close()
+		return "", "", fmt.Errorf("failed to start mDNS: %w", err)
+	}
+
+	// Create pubsub with DHT-based discovery for global peer finding
+	var ps *pubsub.PubSub
+	if kdht != nil {
+		// Use DHT for topic-based peer discovery (enables global connectivity)
+		routingDiscovery := discoveryrouting.NewRoutingDiscovery(kdht)
+		ps, err = pubsub.NewGossipSub(m.ctx, h, pubsub.WithDiscovery(routingDiscovery))
+	} else {
+		// Fallback without discovery
+		ps, err = pubsub.NewGossipSub(m.ctx, h)
+	}
 	if err != nil {
+		mdnsService.Close()
+		if kdht != nil {
+			kdht.Close()
+		}
 		h.Close()
 		return "", "", fmt.Errorf("failed to create pubsub: %w", err)
 	}
@@ -240,6 +312,8 @@ func (m *Manager) CreatePeer(requestedPeerKey string) (peerID string, peerKey st
 		ctx:             m.ctx,
 		host:            h,
 		pubsub:          ps,
+		dht:             kdht,
+		mdnsService:     mdnsService,
 		peerID:          h.ID(),
 		connections:     make(map[string]*Connection),
 		protocols:       make(map[protocol.ID]*ProtocolHandler),
@@ -270,9 +344,15 @@ func (m *Manager) CreatePeer(requestedPeerKey string) (peerID string, peerKey st
 
 	m.peers[p.peerID.String()] = p
 
-	// Log peer creation (we already hold the lock, so log directly)
+	// Log peer creation with connectivity info
 	if m.verbosity >= 1 {
 		fmt.Printf("[%s] Created peer\n", p.alias)
+		if m.verbosity >= 2 {
+			fmt.Printf("[%s] Listen addresses:\n", p.alias)
+			for _, addr := range h.Addrs() {
+				fmt.Printf("[%s]   %s\n", p.alias, addr)
+			}
+		}
 	}
 
 	return p.peerID.String(), encodedKey, nil
@@ -623,6 +703,16 @@ func (p *Peer) Close() error {
 	}
 	p.connections = make(map[string]*Connection)
 	p.mu.Unlock()
+
+	// Close mDNS discovery
+	if p.mdnsService != nil {
+		_ = p.mdnsService.Close()
+	}
+
+	// Close DHT
+	if p.dht != nil {
+		_ = p.dht.Close()
+	}
 
 	// Close host
 	return p.host.Close()
