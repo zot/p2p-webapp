@@ -1,5 +1,5 @@
 # Binaries
-p2p-webapp
+/p2p-webapp
 *.exe
 *.dll
 *.so

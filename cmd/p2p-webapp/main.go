@@ -1,4 +1,4 @@
-package commands
+package main
 
 import (
 	"context"
@@ -10,23 +10,30 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zot/p2p-webapp/internal/bundle"
+	"github.com/zot/p2p-webapp/internal/commands"
 	"github.com/zot/p2p-webapp/internal/ipfs"
 	"github.com/zot/p2p-webapp/internal/peer"
 	"github.com/zot/p2p-webapp/internal/server"
 )
 
 var (
-	noOpen   bool
-	verbose  int
-	port     int
-	dir      string
+	noOpen  bool
+	verbose int
+	port    int
+	dir     string
 )
 
-// ServeCmd represents the serve command
-var ServeCmd = &cobra.Command{
-	Use:   "serve",
-	Short: "Serve a peer-to-peer application",
-	Long: `Serve a peer-to-peer application.
+var rootCmd = &cobra.Command{
+	Use:   "p2p-webapp",
+	Short: "A Go application to host peer-to-peer applications",
+	Long: `p2p-webapp is a Go application that hosts peer-to-peer applications.
+It proxies opinionated IPFS and libp2p operations for managed peers
+and provides a TypeScript library for easy communication with the Go application.
+
+Copyright (C) 2025, Bill Burdick
+MIT Licensed
+Project URL: https://github.com/zot/p2p-webapp
+
 
 Default mode (no --dir flag):
   Serves directly from the bundled site without extracting to filesystem.
@@ -40,10 +47,19 @@ With --dir flag:
 }
 
 func init() {
-	ServeCmd.Flags().BoolVar(&noOpen, "noopen", false, "Do not open browser automatically")
-	ServeCmd.Flags().CountVarP(&verbose, "verbose", "v", "Verbose output (can be specified multiple times: -v, -vv, -vvv)")
-	ServeCmd.Flags().IntVarP(&port, "port", "p", 0, "Port to listen on (default: auto-select starting from 10000)")
-	ServeCmd.Flags().StringVar(&dir, "dir", "", "Directory to serve from (if not specified, serves from bundled site)")
+	rootCmd.Flags().BoolVar(&noOpen, "noopen", false, "Do not open browser automatically")
+	rootCmd.Flags().CountVarP(&verbose, "verbose", "v", "Verbose output (can be specified multiple times: -v, -vv, -vvv)")
+	rootCmd.Flags().IntVarP(&port, "port", "p", 0, "Port to listen on (default: auto-select starting from 10000)")
+	rootCmd.Flags().StringVar(&dir, "dir", "", "Directory to serve from (if not specified, serves from bundled site)")
+
+	rootCmd.AddCommand(commands.ExtractCmd)
+	rootCmd.AddCommand(commands.BundleCmd)
+	rootCmd.AddCommand(commands.LsCmd)
+	rootCmd.AddCommand(commands.CpCmd)
+	rootCmd.AddCommand(commands.PsCmd)
+	rootCmd.AddCommand(commands.KillCmd)
+	rootCmd.AddCommand(commands.KillAllCmd)
+	rootCmd.AddCommand(commands.VersionCmd)
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -169,4 +185,11 @@ func validateDirectoryStructure(baseDir string) error {
 	}
 
 	return nil
+}
+
+func main() {
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 }
