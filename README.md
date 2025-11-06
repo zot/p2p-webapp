@@ -470,7 +470,7 @@ await client.subscribe('my-topic',
 ## FAQ
 
 **Q: Do my users need to install anything?**
-A: Only you (the developer) run `p2p-webapp` locally. Your users just open your web app in their browser.
+A: Each user runs `p2p-webapp` on their own computer.
 
 **Q: How do users discover each other?**
 A: The IPFS/libp2p network handles peer discovery automatically. Users on the same topic find each other.
