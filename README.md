@@ -1,6 +1,6 @@
 # Build Peer-to-Peer Web Apps in Minutes
 
-**p2p-webapp** lets you build real-time, peer-to-peer web applications with just JavaScript. No backend servers. No hosting costs. No signaling servers. No complex setup.
+**p2p-webapp** lets you build real-time, double-clickable, peer-to-peer web applications with just JavaScript. No backend servers. No hosting costs. No signaling servers. No complex setup.
 
 ```typescript
 // Connect to a peer-to-peer chat room in 3 lines
@@ -9,11 +9,13 @@ await client.subscribe('my-chat-topic', (peerID, data) => showMessage(data.text)
 await client.publish('my-chat-topic', { text: 'Hello, P2P world!' });
 ```
 
-## Why Build P2P Web Apps?
+## Why Use P2P-webapp?
 
 - ✨ **No Backend Required** - Your users connect directly to each other
 - 💰 **Zero Hosting Costs** - No servers to maintain or pay for
 - 🔌 **No Signaling Servers** - Native peers, not browser-based WebRTC
+- 👆 **Double-Click to Run** - Distribute as a single executable
+- 🛡️ **Zero Admin** - No infrastructure to configure or maintain
 - 🚀 **Real-Time by Default** - Messages arrive instantly, no polling needed
 - 🔒 **Privacy-First** - Data travels directly between peers
 - 🌍 **Resilient** - No single point of failure
