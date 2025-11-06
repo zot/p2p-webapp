@@ -106,7 +106,8 @@ For peers behind NATs/firewalls (typical for home networks):
 - **NAT Port Mapping**: attempts UPnP/NAT-PMP for automatic port forwarding
 
 ## Commands
-- **serve**
+- **Default behavior (no subcommand)**
+  - running `./p2p-webapp` without a subcommand starts the server
   - operates in one of two modes
     - **default mode** (no --dir flag): serves directly from bundled site without filesystem extraction
       - requires binary to be bundled (use `bundle` command)
@@ -119,7 +120,7 @@ For peers behind NATs/firewalls (typical for home networks):
         - ipfs: content to make available in IPFS (optional)
         - storage: server storage (peer keys, etc.)
       - use after extracting with `extract` command
-      - example: `./p2p-webapp serve --dir .`
+      - example: `./p2p-webapp --dir .`
   - hosts WebSocket-based JSON-RPC protocol service for the site
     - use text-based JSON for commands
     - each side pushes commands to the other
@@ -131,12 +132,12 @@ For peers behind NATs/firewalls (typical for home networks):
       - level 2+: additional debug information
     - -p, --port PORT: specify port to listen on (default: auto-select starting from 10000)
       - if port not available, automatically tries the next port (up to 100 attempts)
-      - example: `./p2p-webapp serve -p 8080`
+      - example: `./p2p-webapp -p 8080`
 - **extract**
   - extracts the bundled site from the binary to the current directory
   - current dir must be empty
   - extracts html/, ipfs/, and storage/ subdirectories
-  - does NOT start the server - run `p2p-webapp serve --dir .` afterwards to serve
+  - does NOT start the server - run `p2p-webapp --dir .` afterwards to serve
   - the default bundled site is a chatroom application that demonstrates key features
     - uses listPeers to discover peers subscribed to the chat topic
     - displays a list of peers on the right side
@@ -230,7 +231,7 @@ p2p-webapp maintains a JSON list of running instance PIDs for process management
 - **Process verification**: When reading the file, automatically verifies PIDs are actual running p2p-webapp instances
 - **Auto-correction**: Removes stale entries for processes that are no longer running
 - **Library**: Uses `github.com/shirou/gopsutil` for cross-platform process management
-- **Registration**: Each `serve` and `extract` command automatically registers its PID on startup
+- **Registration**: The server (when started without a subcommand) and `extract` command automatically register their PIDs on startup
 - **Cleanup**: PIDs are removed when the process exits normally or via `kill`/`killall` commands
 
 The tracking system ensures:

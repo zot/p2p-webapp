@@ -30,7 +30,7 @@ await client.publish('my-chat-topic', { text: 'Hello, P2P world!' });
 - **Live Feeds** - News, updates, real-time dashboards
 - **Voting Systems** - Polls, surveys, decision-making tools
 
-See it in action: Run `./p2p-webapp serve` to try a working chatroom with direct messaging!
+See it in action: Run `./p2p-webapp` to try a working chatroom with direct messaging!
 
 ## Quick Start
 
@@ -47,7 +47,7 @@ make build
 ### 2. Try the Demo
 
 ```bash
-./p2p-webapp serve
+./p2p-webapp
 ```
 
 The bundled binary ships with a complete chatroom demo. Open the URL in multiple browser tabs or windows to see peers connecting to each other. Try the group chat and direct messages!
@@ -126,7 +126,7 @@ Run your app:
 
 That's it! Your P2P app is running. Open multiple browser tabs to see peers connecting.
 
-**Tip:** You can also bundle your app into a standalone binary with `./p2p-webapp bundle . -o my-app`, then users can just run `./my-app serve` without needing the directory structure.
+**Tip:** You can also bundle your app into a standalone binary with `./p2p-webapp bundle . -o my-app`, then users can just run `./my-app` without needing the directory structure.
 
 ## API Overview
 
@@ -299,13 +299,13 @@ my-app/
 
 ## Commands
 
-### `serve` - Run Your P2P App
+### Default: Run Your P2P App
 
-Two modes:
+Running `p2p-webapp` without a subcommand starts the server. Two modes:
 
 **1. Bundled mode (default):**
 ```bash
-./p2p-webapp serve [--noopen] [-p PORT]
+./p2p-webapp [--noopen] [-p PORT] [-v]
 ```
 
 Serves directly from the bundled site without extraction. Efficient - no filesystem needed!
@@ -315,7 +315,7 @@ Serves directly from the bundled site without extraction. Efficient - no filesys
 
 **2. Directory mode:**
 ```bash
-./p2p-webapp serve --dir PATH [--noopen] [-p PORT]
+./p2p-webapp --dir PATH [--noopen] [-p PORT] [-v]
 ```
 
 Serves from a filesystem directory. Use this for:
@@ -357,7 +357,7 @@ Bundles your site into a standalone binary that can be distributed. No compilati
 - Optional `ipfs/` and `storage/` directories
 
 Users can run your bundled app directly:
-- `./my-app serve` - Run immediately from bundle
+- `./my-app` - Run immediately from bundle
 - `./my-app extract` - Extract to filesystem first (optional)
 
 ### `cp` - Copy Client Library
@@ -581,8 +581,8 @@ Contributions welcome! This project follows SOLID principles and emphasizes simp
 **Start building your P2P web app today!** 🚀
 
 ```bash
-./p2p-webapp serve              # Try the demo (runs from bundle)
+./p2p-webapp                    # Try the demo (runs from bundle)
 ./p2p-webapp extract            # Extract demo to examine code
-./p2p-webapp serve --dir .      # Run your own site
+./p2p-webapp --dir .            # Run your own site
 ./p2p-webapp bundle . -o my-app # Create standalone binary
 ```
