@@ -11,24 +11,18 @@ await client.publish('my-chat-topic', { text: 'Hello, P2P world!' });
 
 ## What is p2p-webapp?
 
-**p2p-webapp** is a local server that bridges your web application to the peer-to-peer world. It runs on each user's machine and handles all the complex P2P networking, while your app stays simple—just HTML, CSS, and JavaScript running in the browser.
+**p2p-webapp** is a local backend that eliminates the need for hosting. You distribute a single executable that users double-click to run: it pops up a web page for your app, hosts your site internally, and handles all the P2P networking, so you can build real-time web apps with just HTML, CSS, and JavaScript. No servers to deploy, no files to extract, no hosting costs, and no infrastructure to maintain.
 
 ![p2p-webapp Architecture](arch.svg) 
 
-**The Architecture:**
-- **Your Browser** runs your web application (HTML/CSS/JavaScript)
-- **p2p-webapp** runs locally and contains a native IPFS/libp2p peer
-- **The P2P Network** connects all peers directly without central servers
-- Each user runs their own instance—no shared hosting needed
-
-Your web app never sees the P2P complexity. It just sends simple commands over WebSocket (like `publish()` or `send()`), and p2p-webapp handles peer discovery, NAT traversal, encryption, and message delivery.
+Your web app never sees the P2P complexity -- you just call a handful of simple methods from the TypeScript library. p2p-webapp handles peer discovery, NAT traversal, encryption, and message delivery.
 
 ## Why Use P2P-webapp?
 
 - ✨ **No Backend Required** - Your users connect directly to each other
 - 💰 **Zero Hosting Costs** - No servers to maintain or pay for
 - 🔌 **No Signaling Servers** - Native peers, not browser-based WebRTC
-- 👆 **Double-Click to Run** - Distribute as a single executable
+- 👆 **Double-Click to Run** - Distribute as a single executable, no files extracted
 - 🛡️ **Zero Admin** - No infrastructure to configure or maintain
 - 🚀 **Real-Time by Default** - Messages arrive instantly, no polling needed
 - 🔒 **Privacy-First** - Data travels directly between peers
