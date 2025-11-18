@@ -9,6 +9,20 @@ await client.subscribe('my-chat-topic', (peerID, data) => showMessage(data.text)
 await client.publish('my-chat-topic', { text: 'Hello, P2P world!' });
 ```
 
+## What is p2p-webapp?
+
+**p2p-webapp** is a local server that bridges your web application to the peer-to-peer world. It runs on each user's machine and handles all the complex P2P networking, while your app stays simple—just HTML, CSS, and JavaScript running in the browser.
+
+![p2p-webapp Architecture](arch.svg) 
+
+**The Architecture:**
+- **Your Browser** runs your web application (HTML/CSS/JavaScript)
+- **p2p-webapp** runs locally and contains a native IPFS/libp2p peer
+- **The P2P Network** connects all peers directly without central servers
+- Each user runs their own instance—no shared hosting needed
+
+Your web app never sees the P2P complexity. It just sends simple commands over WebSocket (like `publish()` or `send()`), and p2p-webapp handles peer discovery, NAT traversal, encryption, and message delivery.
+
 ## Why Use P2P-webapp?
 
 - ✨ **No Backend Required** - Your users connect directly to each other
