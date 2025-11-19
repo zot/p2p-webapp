@@ -6,11 +6,15 @@
 ## Participants
 
 - Browser1: First web application instance
-- PeerManager1 (PM1): Manages first peer
+- WebSocketHandler1: Routes requests to Peer1 via PeerManager1
+- PeerManager1: Provides Peer1 instance
+- Peer1: Handles pub/sub operations (has GossipSub1)
 - GossipSub1: libp2p GossipSub instance for peer1
 - DHT: Distributed Hash Table for peer discovery
 - GossipSub2: libp2p GossipSub instance for peer2
-- PeerManager2 (PM2): Manages second peer
+- Peer2: Handles pub/sub operations (has GossipSub2)
+- PeerManager2: Provides Peer2 instance
+- WebSocketHandler2: Routes data to Browser2
 - Browser2: Second web application instance
 
 ## Sequence
@@ -80,7 +84,9 @@
 - GossipSub integrated with DHT for peer discovery
 - Peers advertise topic subscriptions via DHT
 - Automatic peer join/leave monitoring for subscribed topics
-- PeerManager sends peerChange notifications automatically
+- Handler gets Peer from PeerManager, then calls peer.Subscribe(topic)
+- Handler gets Peer from PeerManager, then calls peer.Publish(topic, data)
+- Peer sends peerChange notifications automatically via PeerManager callbacks
 - Messages broadcast to all subscribed peers
 - Topic data includes sender peerID for identification
 - No separate monitoring command needed - automatic with subscribe

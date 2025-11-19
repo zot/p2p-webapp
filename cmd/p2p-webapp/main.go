@@ -86,7 +86,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create IPFS node: %w", err)
 		}
-		defer ipfsNode.Close()
+		defer func() {
+			if verbose >= 3 {
+				fmt.Println("[DEBUG] Closing IPFS node...")
+			}
+			if err := ipfsNode.Close(); err != nil {
+				fmt.Printf("Warning: failed to close IPFS node: %v\n", err)
+			}
+			if verbose >= 3 {
+				fmt.Println("[DEBUG] IPFS node closed")
+			}
+		}()
 
 		fmt.Printf("Peer ID: %s\n", ipfsNode.PeerID())
 
@@ -98,7 +108,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 		// Create HTTP server from directory
 		htmlDir := filepath.Join(dir, "html")
-		srv = server.NewServerFromDir(ctx, peerManager, htmlDir, port, linger)
+		srv = server.NewServerFromDir(ctx, peerManager, htmlDir, port, linger, verbose)
 	} else {
 		// Bundle mode: serve from bundled site
 		bundleReader, err := bundle.GetBundleReader()
@@ -120,7 +130,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create IPFS node: %w", err)
 		}
-		defer ipfsNode.Close()
+		defer func() {
+			if verbose >= 3 {
+				fmt.Println("[DEBUG] Closing IPFS node...")
+			}
+			if err := ipfsNode.Close(); err != nil {
+				fmt.Printf("Warning: failed to close IPFS node: %v\n", err)
+			}
+			if verbose >= 3 {
+				fmt.Println("[DEBUG] IPFS node closed")
+			}
+		}()
 
 		fmt.Printf("Peer ID: %s\n", ipfsNode.PeerID())
 
@@ -131,14 +151,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 
 		// Create HTTP server from bundle
-		srv = server.NewServerFromBundle(ctx, peerManager, bundleReader, port, linger)
+		srv = server.NewServerFromBundle(ctx, peerManager, bundleReader, port, linger, verbose)
 	}
 
 	// Start server
 	if err := srv.Start(); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
 	}
-	defer srv.Stop()
+	defer func() {
+		if verbose >= 3 {
+			fmt.Println("[DEBUG] Calling srv.Stop() from defer...")
+		}
+		if err := srv.Stop(); err != nil {
+			fmt.Printf("Warning: srv.Stop() returned error: %v\n", err)
+		}
+	}()
 
 	// Open browser unless --noopen flag is set
 	if !noOpen {
@@ -152,14 +179,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Wait for interrupt signal or server context cancellation (auto-exit)
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 
 	select {
 	case <-sigCh:
 		fmt.Println("\nShutting down...")
+		// Defers will handle cleanup in correct order
 	case <-srv.Done():
 		// Server context was cancelled (auto-exit triggered)
 		fmt.Println("Server context cancelled")
+		// Defers will handle cleanup in correct order
 	}
 
 	return nil

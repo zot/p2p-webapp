@@ -19,6 +19,7 @@ export interface PeerResponse {
 }
 export interface PeerRequest {
     peerkey?: string;
+    rootDirectory?: string;
 }
 export interface StartRequest {
     protocol: string;
@@ -48,23 +49,21 @@ export interface ListPeersRequest {
 export interface ListPeersResponse {
     peers: string[];
 }
-export interface ListFilesResponse {
-    files: {
-        [path: string]: string;
-    };
+export interface FileEntry {
+    type: "file" | "directory";
+    cid: string;
+    mimeType?: string;
+}
+export interface ListFilesRequest {
+    peerid: string;
 }
 export interface GetFileRequest {
     cid: string;
 }
-export interface GetFileResponse {
-    content: string;
-}
 export interface StoreFileRequest {
     path: string;
-    content: string;
-}
-export interface StoreFileResponse {
-    cid: string;
+    content?: string;
+    directory: boolean;
 }
 export interface RemoveFileRequest {
     path: string;
@@ -87,7 +86,30 @@ export interface PeerChangeRequest {
 export interface AckRequest {
     ack: number;
 }
+export interface PeerFilesRequest {
+    peerid: string;
+    cid: string;
+    entries: {
+        [path: string]: FileEntry;
+    };
+}
+export interface GotFileRequest {
+    cid: string;
+    success: boolean;
+    content: any;
+}
 export type ProtocolDataCallback = (peer: string, data: any) => void | Promise<void>;
 export type TopicDataCallback = (peerID: string, data: any) => void | Promise<void>;
 export type PeerChangeCallback = (peerID: string, joined: boolean) => void | Promise<void>;
-export type AckCallback = () => void | Promise<void>;
+export type FileContent = FileContentFile | FileContentDirectory;
+export interface FileContentFile {
+    type: 'file';
+    mimeType: string;
+    content: string;
+}
+export interface FileContentDirectory {
+    type: 'directory';
+    entries: {
+        [pathname: string]: string;
+    };
+}

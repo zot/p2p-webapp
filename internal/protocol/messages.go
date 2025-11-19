@@ -38,7 +38,8 @@ type ErrorResponse struct {
 
 // PeerRequest creates or restores a peer
 type PeerRequest struct {
-	PeerKey string `json:"peerkey,omitempty"`
+	PeerKey       string `json:"peerkey,omitempty"`
+	RootDirectory string `json:"rootDirectory,omitempty"` // Optional CID of peer's root directory
 }
 
 // StartRequest starts listening for a protocol
@@ -113,35 +114,47 @@ type AckRequest struct {
 	Ack int `json:"ack"`
 }
 
-// File Operation Messages
-
-// ListFilesResponse returns map of file paths to CIDs
-type ListFilesResponse struct {
-	Files map[string]string `json:"files"`
+// PeerFilesRequest notifies client of a peer's file list (server-to-client)
+type PeerFilesRequest struct {
+	PeerID  string                   `json:"peerid"`  // Target peer whose files were listed
+	CID     string                   `json:"cid"`     // Root directory CID
+	Entries map[string]FileEntryInfo `json:"entries"` // Full pathname tree
 }
 
-// GetFileRequest requests file content by CID
+// FileEntryInfo contains metadata about a file or directory
+type FileEntryInfo struct {
+	Type     string `json:"type"`               // "file" or "directory"
+	CID      string `json:"cid"`                // Content identifier
+	MimeType string `json:"mimeType,omitempty"` // MIME type for files
+}
+
+// GotFileRequest notifies client of file retrieval result (server-to-client)
+type GotFileRequest struct {
+	CID     string `json:"cid"`     // Requested CID
+	Success bool   `json:"success"` // Whether retrieval was successful
+	Content any    `json:"content"` // File content or error info
+}
+
+// File Operation Messages
+
+// ListFilesRequest requests a peer's file list (async, result via peerFiles server message)
+type ListFilesRequest struct {
+	PeerID string `json:"peerid"` // Peer whose files to list
+}
+
+// GetFileRequest requests file content by CID (async, result via gotFile server message)
 type GetFileRequest struct {
 	CID string `json:"cid"`
 }
 
-// GetFileResponse returns file content (base64 encoded)
-type GetFileResponse struct {
-	Content string `json:"content"` // base64 encoded
-}
-
-// StoreFileRequest stores file content
+// StoreFileRequest stores file or directory content
 type StoreFileRequest struct {
-	Path    string `json:"path"`
-	Content string `json:"content"` // base64 encoded
+	Path      string `json:"path"`
+	Content   string `json:"content,omitempty"` // base64 encoded file content (null for directories)
+	Directory bool   `json:"directory"`          // true = create directory, false = create file
 }
 
-// StoreFileResponse returns the CID of stored file
-type StoreFileResponse struct {
-	CID string `json:"cid"`
-}
-
-// RemoveFileRequest removes a file
+// RemoveFileRequest removes a file or directory
 type RemoveFileRequest struct {
 	Path string `json:"path"`
 }

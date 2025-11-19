@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+
+	"github.com/zot/p2p-webapp/internal/peer"
 )
 
 // Handler routes and processes protocol messages
@@ -20,22 +22,12 @@ type Handler struct {
 
 // PeerManager interface for peer operations (Dependency Inversion)
 type PeerManager interface {
-	CreatePeer(requestedPeerKey string) (peerID string, peerKey string, err error)
+	CreatePeer(requestedPeerKey string, rootDirectory string) (peerID string, peerKey string, err error)
 	RemovePeer(peerID string) error
-	Start(peerID, protocol string) error
-	Stop(peerID, protocol string) error
-	Send(peerID, targetPeer, protocol string, data any) error
-	Subscribe(peerID, topic string) error
-	Publish(peerID, topic string, data any) error
-	Unsubscribe(peerID, topic string) error
-	ListPeers(peerID, topic string) ([]string, error)
-	Monitor(peerID, topic string) error
-	StopMonitor(peerID, topic string) error
-	// File operations
-	ListFiles(peerID string) (map[string]string, error)
-	GetFile(cidStr string) ([]byte, error)
-	StoreFile(peerID, path string, content []byte) (string, error)
-	RemoveFile(peerID, path string) error
+	GetPeer(peerID string) (peer.PeerOperations, error)
+	// Callback setters
+	SetPeerFilesCallback(cb func(receiverPeerID, targetPeerID, dirCID string, entries map[string]any))
+	SetGotFileCallback(cb func(receiverPeerID string, cid string, success bool, content any))
 }
 
 // NewHandler creates a new protocol handler
@@ -95,7 +87,7 @@ func (h *Handler) handlePeer(msg *Message) (*Message, error) {
 		}
 	}
 
-	peerID, peerKey, err := h.peerManager.CreatePeer(req.PeerKey)
+	peerID, peerKey, err := h.peerManager.CreatePeer(req.PeerKey, req.RootDirectory)
 	if err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
@@ -109,7 +101,12 @@ func (h *Handler) handleStart(msg *Message, peerID string) (*Message, error) {
 		return h.errorResponse(msg.RequestID, 400, "invalid params")
 	}
 
-	if err := h.peerManager.Start(peerID, req.Protocol); err != nil {
+	peer, err := h.peerManager.GetPeer(peerID)
+	if err != nil {
+		return h.errorResponse(msg.RequestID, 404, err.Error())
+	}
+
+	if err := peer.Start(req.Protocol); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
@@ -122,7 +119,12 @@ func (h *Handler) handleStop(msg *Message, peerID string) (*Message, error) {
 		return h.errorResponse(msg.RequestID, 400, "invalid params")
 	}
 
-	if err := h.peerManager.Stop(peerID, req.Protocol); err != nil {
+	peer, err := h.peerManager.GetPeer(peerID)
+	if err != nil {
+		return h.errorResponse(msg.RequestID, 404, err.Error())
+	}
+
+	if err := peer.Stop(req.Protocol); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
@@ -135,7 +137,12 @@ func (h *Handler) handleSend(msg *Message, peerID string) (*Message, error) {
 		return h.errorResponse(msg.RequestID, 400, "invalid params")
 	}
 
-	if err := h.peerManager.Send(peerID, req.Peer, req.Protocol, req.Data); err != nil {
+	peer, err := h.peerManager.GetPeer(peerID)
+	if err != nil {
+		return h.errorResponse(msg.RequestID, 404, err.Error())
+	}
+
+	if err := peer.SendToPeer(req.Peer, req.Protocol, req.Data); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
@@ -153,12 +160,17 @@ func (h *Handler) handleSubscribe(msg *Message, peerID string) (*Message, error)
 		return h.errorResponse(msg.RequestID, 400, "invalid params")
 	}
 
-	if err := h.peerManager.Subscribe(peerID, req.Topic); err != nil {
+	peer, err := h.peerManager.GetPeer(peerID)
+	if err != nil {
+		return h.errorResponse(msg.RequestID, 404, err.Error())
+	}
+
+	if err := peer.Subscribe(req.Topic); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
 	// Automatically start monitoring peer join/leave events
-	if err := h.peerManager.Monitor(peerID, req.Topic); err != nil {
+	if err := peer.Monitor(req.Topic); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
@@ -171,7 +183,12 @@ func (h *Handler) handlePublish(msg *Message, peerID string) (*Message, error) {
 		return h.errorResponse(msg.RequestID, 400, "invalid params")
 	}
 
-	if err := h.peerManager.Publish(peerID, req.Topic, req.Data); err != nil {
+	peer, err := h.peerManager.GetPeer(peerID)
+	if err != nil {
+		return h.errorResponse(msg.RequestID, 404, err.Error())
+	}
+
+	if err := peer.Publish(req.Topic, req.Data); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
@@ -184,12 +201,17 @@ func (h *Handler) handleUnsubscribe(msg *Message, peerID string) (*Message, erro
 		return h.errorResponse(msg.RequestID, 400, "invalid params")
 	}
 
-	if err := h.peerManager.Unsubscribe(peerID, req.Topic); err != nil {
+	peer, err := h.peerManager.GetPeer(peerID)
+	if err != nil {
+		return h.errorResponse(msg.RequestID, 404, err.Error())
+	}
+
+	if err := peer.Unsubscribe(req.Topic); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
 	// Automatically stop monitoring peer join/leave events
-	if err := h.peerManager.StopMonitor(peerID, req.Topic); err != nil {
+	if err := peer.StopMonitor(req.Topic); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
@@ -202,7 +224,12 @@ func (h *Handler) handleListPeers(msg *Message, peerID string) (*Message, error)
 		return h.errorResponse(msg.RequestID, 400, "invalid params")
 	}
 
-	peers, err := h.peerManager.ListPeers(peerID, req.Topic)
+	peer, err := h.peerManager.GetPeer(peerID)
+	if err != nil {
+		return h.errorResponse(msg.RequestID, 404, err.Error())
+	}
+
+	peers, err := peer.ListPeers(req.Topic)
 	if err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
@@ -217,18 +244,23 @@ func (h *Handler) handleListPeers(msg *Message, peerID string) (*Message, error)
 }
 
 func (h *Handler) handleListFiles(msg *Message, peerID string) (*Message, error) {
-	files, err := h.peerManager.ListFiles(peerID)
+	var req ListFilesRequest
+	if err := json.Unmarshal(msg.Params, &req); err != nil {
+		return h.errorResponse(msg.RequestID, 400, "invalid params")
+	}
+
+	// Get the requesting peer
+	peer, err := h.peerManager.GetPeer(peerID)
 	if err != nil {
+		return h.errorResponse(msg.RequestID, 404, err.Error())
+	}
+
+	// Async operation - actual result comes via peerFiles server message
+	if err := peer.ListFiles(req.PeerID); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
-	resp := ListFilesResponse{Files: files}
-	result, _ := json.Marshal(resp)
-	return &Message{
-		RequestID:  msg.RequestID,
-		IsResponse: true,
-		Result:     result,
-	}, nil
+	return h.emptyResponse(msg.RequestID)
 }
 
 func (h *Handler) handleGetFile(msg *Message, peerID string) (*Message, error) {
@@ -237,20 +269,18 @@ func (h *Handler) handleGetFile(msg *Message, peerID string) (*Message, error) {
 		return h.errorResponse(msg.RequestID, 400, "invalid params")
 	}
 
-	content, err := h.peerManager.GetFile(req.CID)
+	// Get the requesting peer
+	peer, err := h.peerManager.GetPeer(peerID)
 	if err != nil {
+		return h.errorResponse(msg.RequestID, 404, err.Error())
+	}
+
+	// Async operation - actual result comes via gotFile server message
+	if err := peer.GetFile(req.CID); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
-	// Encode content as base64
-	encoded := base64.StdEncoding.EncodeToString(content)
-	resp := GetFileResponse{Content: encoded}
-	result, _ := json.Marshal(resp)
-	return &Message{
-		RequestID:  msg.RequestID,
-		IsResponse: true,
-		Result:     result,
-	}, nil
+	return h.emptyResponse(msg.RequestID)
 }
 
 func (h *Handler) handleStoreFile(msg *Message, peerID string) (*Message, error) {
@@ -259,24 +289,26 @@ func (h *Handler) handleStoreFile(msg *Message, peerID string) (*Message, error)
 		return h.errorResponse(msg.RequestID, 400, "invalid params")
 	}
 
-	// Decode base64 content
-	content, err := base64.StdEncoding.DecodeString(req.Content)
+	peer, err := h.peerManager.GetPeer(peerID)
 	if err != nil {
-		return h.errorResponse(msg.RequestID, 400, "invalid base64 content")
+		return h.errorResponse(msg.RequestID, 404, err.Error())
 	}
 
-	cid, err := h.peerManager.StoreFile(peerID, req.Path, content)
-	if err != nil {
+	var content []byte
+	if !req.Directory {
+		// Decode base64 content for files
+		var err error
+		content, err = base64.StdEncoding.DecodeString(req.Content)
+		if err != nil {
+			return h.errorResponse(msg.RequestID, 400, "invalid base64 content")
+		}
+	}
+
+	if err := peer.StoreFile(req.Path, content, req.Directory); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
-	resp := StoreFileResponse{CID: cid}
-	result, _ := json.Marshal(resp)
-	return &Message{
-		RequestID:  msg.RequestID,
-		IsResponse: true,
-		Result:     result,
-	}, nil
+	return h.emptyResponse(msg.RequestID)
 }
 
 func (h *Handler) handleRemoveFile(msg *Message, peerID string) (*Message, error) {
@@ -285,7 +317,12 @@ func (h *Handler) handleRemoveFile(msg *Message, peerID string) (*Message, error
 		return h.errorResponse(msg.RequestID, 400, "invalid params")
 	}
 
-	if err := h.peerManager.RemoveFile(peerID, req.Path); err != nil {
+	peer, err := h.peerManager.GetPeer(peerID)
+	if err != nil {
+		return h.errorResponse(msg.RequestID, 404, err.Error())
+	}
+
+	if err := peer.RemoveFile(req.Path); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
@@ -352,6 +389,34 @@ func (h *Handler) CreateAckMessage(ack int) *Message {
 	return &Message{
 		RequestID: h.NextRequestID(),
 		Method:    "ack",
+		Params:    params,
+	}
+}
+
+func (h *Handler) CreatePeerFilesMessage(peerID, cid string, entries map[string]FileEntryInfo) *Message {
+	req := PeerFilesRequest{
+		PeerID:  peerID,
+		CID:     cid,
+		Entries: entries,
+	}
+	params, _ := json.Marshal(req)
+	return &Message{
+		RequestID: h.NextRequestID(),
+		Method:    "peerFiles",
+		Params:    params,
+	}
+}
+
+func (h *Handler) CreateGotFileMessage(cid string, success bool, content any) *Message {
+	req := GotFileRequest{
+		CID:     cid,
+		Success: success,
+		Content: content,
+	}
+	params, _ := json.Marshal(req)
+	return &Message{
+		RequestID: h.NextRequestID(),
+		Method:    "gotFile",
 		Params:    params,
 	}
 }

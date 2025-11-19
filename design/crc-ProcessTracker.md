@@ -14,8 +14,8 @@
 - listPIDs: Get all tracked PIDs
 - verifyPID: Check if PID is actual running p2p-webapp instance
 - cleanStale: Remove stale entries (PIDs no longer running)
-- killPID: Terminate specific instance by PID
-- killAll: Terminate all tracked instances
+- killPID: Terminate specific instance by PID (SIGTERM first, wait 5s, then SIGKILL if needed)
+- killAll: Terminate all tracked instances (SIGTERM first, wait 5s, then SIGKILL if needed)
 - lockFile: Acquire file lock for safe concurrent access
 - unlockFile: Release file lock
 

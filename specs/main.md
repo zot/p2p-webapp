@@ -9,10 +9,10 @@
     - internally performs WebSocket connect followed by peer protocol message
   - uses protocol-based addressing with (peer, protocol) tuples instead of connection IDs
   - `start(protocol, onData)` registers listener that receives (peer, data) for all messages on that protocol
-  - `send(peer, protocol, data, onAck?)` sends data directly using peer+protocol addressing
-    - optional `onAck` callback invoked when delivery is confirmed
+  - `send(peer, protocol, data): Promise<void>` sends data directly using peer+protocol addressing
+    - returns Promise that resolves when delivery is confirmed
     - client library manages ack numbers internally (upward counting)
-    - consumers don't see ack numbers, only get delivery confirmation via callback
+    - consumers don't see ack numbers, only get delivery confirmation via promise resolution
   - server manages all connection lifecycle, retry, and reliability concerns transparently
   - listeners automatically removed on `stop()` or WebSocket disconnect
   - the demo (`internal/commands/demo/index.html`) demonstrates how to use the library
@@ -105,6 +105,41 @@ For peers behind NATs/firewalls (typical for home networks):
         - only displays via `addMessage()` if currently viewing that DM
       - `switchToDM()` simply switches UI view - no connection management needed
       - server transparently manages all stream lifecycle and reliability
+    - file browser feature
+      - **Browse Files button**: Located in the top-right header
+        - Context-aware label changes based on current selection:
+          - "Browse My Files" when chatroom is selected (default)
+          - "Browse Peer's Files" when a peer is selected
+      - **File Browser Modal**: Displays IPFS files in a hierarchical tree structure
+        - **Peer selector dropdown**: Switch between viewing own files and peer files
+        - **Hierarchical tree display**:
+          - Folders and files displayed with icons (📁 for directories, 📄 for files)
+          - Expandable/collapsible folders to navigate nested structure
+          - Indentation shows hierarchy depth
+          - Files display name and CID
+        - **Folder selection**:
+          - Click a folder to select it (visual highlight)
+          - Selected folder becomes the target for uploads and new directories
+          - When a folder is created, it is automatically selected
+          - Root (no selection) is the default target
+        - **File operations** (context-dependent):
+          - **Own files** (full access):
+            - Upload files: drag-and-drop or file picker button
+              - Files uploaded to currently selected folder (prefixed with folder path)
+            - Create new directory: button with name prompt
+              - Directory created in currently selected folder (prefixed with folder path)
+              - Newly created directory is automatically selected
+            - Download files: click to retrieve by CID
+          - **Peer files** (read-only):
+            - Download only: retrieve files by CID
+            - Upload and create directory buttons disabled
+        - **Implementation details**:
+          - Uses `listFiles(peerid): Promise<{rootCID, entries}>` to fetch directory tree
+          - Converts flat pathname entries to hierarchical tree structure
+          - Stores expanded/collapsed state per directory
+          - Uses `storeFile(path, content, directory)` for uploads and directory creation
+          - Uses `getFile(cid): Promise<FileContent>` for downloads
+          - Modal overlay with close button to return to chat
 - **bundle**
   - creates a standalone binary with a site bundled into it
   - works with both bundled and unbundled source binaries (replaces existing bundle if present)
@@ -159,12 +194,19 @@ For peers behind NATs/firewalls (typical for home networks):
   - terminates a specific running instance by PID
   - usage: `./p2p-webapp kill PID`
   - validates that PID is actually an p2p-webapp instance
+  - uses graceful shutdown procedure:
+    1. First sends SIGTERM (15) for clean shutdown
+    2. Waits up to 5 seconds for process to terminate
+    3. If still running after 5 seconds, sends SIGKILL (9) to force termination
   - removes the instance from the tracking file
   - returns error if PID is not found or not an p2p-webapp process
 - **killall**
   - terminates all running p2p-webapp instances
   - usage: `./p2p-webapp killall`
-  - kills all instances tracked in the PID file
+  - kills all instances tracked in the PID file using graceful shutdown:
+    1. Sends SIGTERM (15) to all instances for clean shutdown
+    2. Waits up to 5 seconds for each process to terminate
+    3. For any processes still running, sends SIGKILL (9) to force termination
   - automatically validates and cleans up stale entries
   - reports how many instances were killed
 
@@ -183,6 +225,25 @@ The tracking system ensures:
 2. Only verified p2p-webapp processes are listed
 3. Stale entries are automatically cleaned up
 4. Safe concurrent access from multiple instances
+
+## Signal Handling
+p2p-webapp responds to the following signals with graceful shutdown:
+- **SIGHUP (1)**: Graceful shutdown, cleanup resources, close connections
+- **SIGINT (2)**: Graceful shutdown (typically sent by Ctrl+C)
+- **SIGTERM (15)**: Graceful shutdown (default kill signal)
+
+**Graceful shutdown procedure:**
+1. Stop accepting new WebSocket connections
+2. Close all active WebSocket connections gracefully
+3. Stop all libp2p peers and close streams
+4. Close DHT and other libp2p resources
+5. Unregister PID from process tracking file
+6. Exit cleanly
+
+**Why these signals?**
+- SIGHUP: Traditional "hangup" signal, often used for reload/restart in daemons
+- SIGINT: Interactive interrupt (Ctrl+C), allows user to stop server cleanly
+- SIGTERM: Standard termination signal, allows orchestrators/scripts to stop server cleanly
 
 # Message format
 - a request has a requestID
@@ -255,14 +316,14 @@ Peers and their WebSocket connections are ephemeral. The client provides peerKey
 - Get list of peers subscribed to a topic
 ### Response: array of peer IDs or error
 
-## listFiles(peerid: any)
+## listFiles(peerid: string): Promise<{rootCID: string, entries: FileEntries}>
 ### Client TS code
 1. Create a promise and add the resolve/reject pair to the listFiles handler for peerid (create if needed), this will be called later on when the client receives the `peerFiles` server message
 2. If the handler list was just created, send this client message to Go, otherwise do not send because one is already pending
-3. Return the promise
+3. Return the promise that will resolve with `{rootCID, entries}` when the `peerFiles` message is received
 
 ### Go code
-Requests a list of files for a peer. The response will go to the client as a `peerFiles` server message (see response).
+Requests a list of files for a peer. The response will go to the client as a `peerFiles` server message which the client library uses to resolve the promise.
 
 Libp2p messaging in this section uses a reserved libp2p peer messaging protocol named `p2p-webapp`.
 
@@ -304,14 +365,16 @@ Example entries object:
 }
 ```
 
-## getFile(cid: string)
+## getFile(cid: string): Promise<FileContent>
 - Get IPFS content by CID
-- Will send a server message `gotFile(cid, {success: bool, content})` to the client when it is retrieved
-  - if there was an error, `success` will be `false` and `content` will contain an error object
-  - if successful, content will be JSON for a directory or a file:
-    - `{type: "file", mimeType: string, content: string}`
-    - `{type: "directory", entries: {PATHNAME: CID, ...}}`
-### Response: null or error
+- Returns Promise that resolves with file content or rejects on error
+- Content format for files:
+  - `{type: "file", mimeType: string, content: string}` (content is base64-encoded)
+  - **Why base64?** Binary files (images, PDFs, executables) contain arbitrary bytes that aren't valid UTF-8. JSON can only safely encode UTF-8 strings, so base64 encoding is required to transmit binary data without corruption.
+- Content format for directories:
+  - `{type: "directory", entries: {PATHNAME: CID, ...}}`
+- Internally sends a server message `gotFile(cid, {success: bool, content})` which the client library uses to resolve/reject the promise
+### Response: null or error (promise resolution handled by client library)
 
 ## storeFile(path: string, content: string | null, directory: bool)
 Make a file or directory node (as indicated) and store it in ipfs-lite, which will return the new node. Content will be null for a directory, if directory is false, it is an error for content to be null.
@@ -414,21 +477,19 @@ The TypeScript client library implements robust message handling with proper ord
 - `stop(protocol)`: Remove listener, disable sending
 
 ### Message Acknowledgment
-The client library provides optional delivery confirmation for sent messages:
-- **Client API**: `send(peer, protocol, data, onAck?)`
-  - `onAck` is an optional callback: `() => void | Promise<void>`
-  - Called when the message is successfully delivered to the peer
-  - If `onAck` is provided, client library automatically:
+The client library provides delivery confirmation for all sent messages via Promise resolution:
+- **Client API**: `send(peer, protocol, data): Promise<void>`
+  - Returns a Promise that resolves when the message is successfully delivered to the peer
+  - Client library automatically:
     - Assigns an internal ack number (starting from 0, incrementing)
     - Includes ack number in the send request to server
-    - Stores the callback in an internal map keyed by ack number
-  - If `onAck` is not provided, no ack number is sent and no acknowledgment occurs
-- **Server behavior**: Only if `ack` parameter was in the send request, sends `ack(ack: number)` message when delivery confirmed
+    - Stores the promise's resolve/reject functions in an internal map keyed by ack number
+- **Server behavior**: Sends `ack(ack: number)` message when delivery confirmed
 - **Client handling**: On receiving `ack` message:
-  - Looks up callback in internal map by ack number
-  - Invokes callback (with async/await support)
-  - Removes callback from map
-- **Consumer perspective**: Simple callback interface, no ack number management needed
+  - Looks up promise resolve function in internal map by ack number
+  - Calls resolve to fulfill the promise
+  - Removes entry from map
+- **Consumer perspective**: Simple promise-based interface, no ack number management needed
 
 ## SPA Routing Support
 The server implements automatic SPA (Single Page Application) routing fallback:

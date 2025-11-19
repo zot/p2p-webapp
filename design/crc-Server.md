@@ -15,6 +15,7 @@
 - start: Begin listening on port, register PID with ProcessTracker
 - serve: Coordinate between WebSocket, peer, and HTTP services
 - shutdown: Clean shutdown of all services, unregister PID
+- handleSignals: Listen for SIGHUP (1), SIGINT (2), SIGTERM (15) and trigger graceful shutdown
 
 ## Collaborators
 

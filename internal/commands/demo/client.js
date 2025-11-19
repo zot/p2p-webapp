@@ -12,9 +12,12 @@ export class P2PWebAppClient {
         // Message queuing for sequential processing
         this.messageQueue = [];
         this.processingMessage = false;
-        // Ack tracking
+        // Ack tracking for send() promises
         this.nextAckNumber = 0;
-        this.ackCallbacks = new Map(); // key: ack number
+        this.ackPending = new Map(); // key: ack number
+        // File operation promise tracking
+        this.fileListPending = new Map(); // key: peerID
+        this.getFilePending = new Map(); // key: CID
     }
     /**
      * Connect to the WebSocket server and initialize peer identity
@@ -74,19 +77,22 @@ export class P2PWebAppClient {
      * @param peer Target peer ID
      * @param protocol Protocol name
      * @param data Data to send
-     * @param onAck Optional callback invoked when delivery is confirmed
+     * @returns Promise that resolves when delivery is confirmed
      */
-    async send(peer, protocol, data, onAck) {
+    async send(peer, protocol, data) {
         if (!this.protocolListeners.has(protocol)) {
             throw new Error(`Cannot send on protocol '${protocol}': protocol not started. Call start() first.`);
         }
-        let ackNum = -1; // Default: no ack requested
-        if (onAck) {
-            // Assign ack number and store callback
-            ackNum = this.nextAckNumber++;
-            this.ackCallbacks.set(ackNum, onAck);
-        }
+        // Always request acknowledgment
+        const ackNum = this.nextAckNumber++;
+        // Create promise that will resolve when ack is received
+        const ackPromise = new Promise((resolve, reject) => {
+            this.ackPending.set(ackNum, { resolve, reject });
+        });
+        // Send the request
         await this.sendRequest('send', { peer, protocol, data, ack: ackNum });
+        // Wait for ack
+        return ackPromise;
     }
     /**
      * Subscribe to a topic with data listener and optional peer change listener
@@ -122,46 +128,68 @@ export class P2PWebAppClient {
         return response.peers || [];
     }
     /**
-     * List files stored for this peer
-     * @returns Map of file paths to CIDs
+     * List files for a peer
+     * @param peerid Peer ID whose files to list
+     * @returns Promise resolving with {rootCID, entries}
      */
-    async listFiles() {
-        const result = await this.sendRequest('listfiles', {});
-        const response = result;
-        return response.files || {};
+    async listFiles(peerid) {
+        // Check if there's already a pending request for this peer
+        if (this.fileListPending.has(peerid)) {
+            // Wait for existing request to complete
+            return this.fileListPending.get(peerid).promise;
+        }
+        // Create promise that will resolve when peerFiles message is received
+        let resolveFunc;
+        let rejectFunc;
+        const promise = new Promise((resolve, reject) => {
+            resolveFunc = resolve;
+            rejectFunc = reject;
+        });
+        this.fileListPending.set(peerid, { promise, resolve: resolveFunc, reject: rejectFunc });
+        // Send request (actual result comes via peerFiles server message)
+        await this.sendRequest('listfiles', { peerid });
+        return promise;
     }
     /**
-     * Get file content by CID
-     * @param cid Content identifier of the file
-     * @returns File content as Uint8Array
+     * Get file or directory content by CID
+     * @param cid Content identifier
+     * @returns Promise resolving with file content or rejecting on error
      */
     async getFile(cid) {
-        const result = await this.sendRequest('getfile', { cid });
-        const response = result;
-        // Decode base64 to Uint8Array
-        const binaryString = atob(response.content);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
+        // Check if there's already a pending request for this CID
+        if (this.getFilePending.has(cid)) {
+            // Wait for existing request to complete
+            return this.getFilePending.get(cid).promise;
         }
-        return bytes;
+        // Create promise that will resolve when gotFile message is received
+        let resolveFunc;
+        let rejectFunc;
+        const promise = new Promise((resolve, reject) => {
+            resolveFunc = resolve;
+            rejectFunc = reject;
+        });
+        this.getFilePending.set(cid, { promise, resolve: resolveFunc, reject: rejectFunc });
+        // Send request (actual result comes via gotFile server message)
+        await this.sendRequest('getfile', { cid });
+        return promise;
     }
     /**
-     * Store file content for this peer
+     * Store file or directory for this peer
      * @param path File path identifier
-     * @param content File content as Uint8Array
-     * @returns CID of the stored file
+     * @param content File content as Uint8Array (null for directories)
+     * @param directory true = create directory, false = create file
      */
-    async storeFile(path, content) {
-        // Encode Uint8Array to base64
-        let binaryString = '';
-        for (let i = 0; i < content.length; i++) {
-            binaryString += String.fromCharCode(content[i]);
+    async storeFile(path, content, directory) {
+        let base64Content;
+        if (!directory && content) {
+            // Encode Uint8Array to base64 for files
+            let binaryString = '';
+            for (let i = 0; i < content.length; i++) {
+                binaryString += String.fromCharCode(content[i]);
+            }
+            base64Content = btoa(binaryString);
         }
-        const base64Content = btoa(binaryString);
-        const result = await this.sendRequest('storefile', { path, content: base64Content });
-        const response = result;
-        return response.cid;
+        await this.sendRequest('storefile', { path, content: base64Content, directory });
     }
     /**
      * Remove a file from this peer's storage
@@ -284,14 +312,34 @@ export class P2PWebAppClient {
             case 'ack':
                 if (msg.params) {
                     const req = msg.params;
-                    const callback = this.ackCallbacks.get(req.ack);
-                    if (callback) {
-                        this.ackCallbacks.delete(req.ack); // Remove callback after use
-                        try {
-                            await callback();
+                    const pending = this.ackPending.get(req.ack);
+                    if (pending) {
+                        this.ackPending.delete(req.ack); // Remove pending promise after use
+                        pending.resolve(undefined);
+                    }
+                }
+                break;
+            case 'peerFiles':
+                if (msg.params) {
+                    const req = msg.params;
+                    const pending = this.fileListPending.get(req.peerid);
+                    if (pending) {
+                        this.fileListPending.delete(req.peerid); // Remove pending promise after use
+                        pending.resolve({ rootCID: req.cid, entries: req.entries });
+                    }
+                }
+                break;
+            case 'gotFile':
+                if (msg.params) {
+                    const req = msg.params;
+                    const pending = this.getFilePending.get(req.cid);
+                    if (pending) {
+                        this.getFilePending.delete(req.cid); // Remove pending promise after use
+                        if (req.success) {
+                            pending.resolve(req.content);
                         }
-                        catch (error) {
-                            console.error('Error in ack callback:', error);
+                        else {
+                            pending.reject(new Error(req.content?.error || 'Failed to retrieve file'));
                         }
                     }
                 }
@@ -303,7 +351,13 @@ export class P2PWebAppClient {
         this.protocolListeners.clear();
         this.topicListeners.clear();
         this.peerChangeListeners.clear();
-        this.ackCallbacks.clear();
+        // Reject all pending promises
+        this.ackPending.forEach(pending => pending.reject(new Error('Connection closed')));
+        this.ackPending.clear();
+        this.fileListPending.forEach(pending => pending.reject(new Error('Connection closed')));
+        this.fileListPending.clear();
+        this.getFilePending.forEach(pending => pending.reject(new Error('Connection closed')));
+        this.getFilePending.clear();
         this.messageQueue.length = 0;
         this.processingMessage = false;
     }

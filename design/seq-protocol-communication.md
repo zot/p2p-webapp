@@ -6,10 +6,12 @@
 ## Participants
 
 - Browser1: Sending web application
-- PeerManager1 (PM1): Manages local peer
-- Peer1: Local libp2p peer
-- Peer2: Remote libp2p peer
-- PeerManager2 (PM2): Manages remote peer
+- WebSocketHandler1: Routes requests to Peer1 via PeerManager1
+- PeerManager1: Provides Peer1 instance
+- Peer1: Local libp2p peer (handles protocol operations)
+- Peer2: Remote libp2p peer (handles protocol operations)
+- PeerManager2: Provides Peer2 instance
+- WebSocketHandler2: Routes data to Browser2
 - Browser2: Receiving web application
 
 ## Sequence
@@ -86,8 +88,10 @@
 ## Notes
 
 - Protocol must be started before sending (validates protocol is registered)
+- Handler gets Peer from PeerManager, then calls peer.Start(protocol)
+- Handler gets Peer from PeerManager, then calls peer.SendToPeer(targetPeer, protocol, data)
 - Uses virtual connection model: client addresses by (peer, protocol) tuple
-- Server manages stream lifecycle transparently
+- Peer manages stream lifecycle transparently
 - Streams created on-demand, reused for subsequent messages
 - Key format: "peerID:protocol" for stream lookup
 - Optional ack callback provides delivery confirmation

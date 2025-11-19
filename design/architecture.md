@@ -15,6 +15,7 @@
 **Design Elements**:
 - crc-Server.md
 - seq-server-startup.md
+- seq-server-shutdown.md
 
 ### WebSocket Protocol System
 
@@ -30,6 +31,7 @@
 
 **Design Elements**:
 - crc-PeerManager.md
+- crc-Peer.md
 - seq-protocol-communication.md
 - seq-pubsub-communication.md
 
@@ -66,7 +68,8 @@
 **Purpose**: Per-peer IPFS file storage using HAMTDirectory, with ownership enforcement and cross-peer file list queries
 
 **Design Elements**:
-- crc-PeerManager.md (HAMTDirectory management, CID tracking)
+- crc-Peer.md (HAMTDirectory management, CID tracking, file operations)
+- crc-PeerManager.md (provides Peer instances)
 - crc-WebSocketHandler.md (ownership enforcement, request routing)
 - crc-P2PWebAppClient.md (client file API)
 - seq-list-files.md

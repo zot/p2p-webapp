@@ -17,7 +17,7 @@
 
 ## System Overview
 
-p2p-webapp is a local backend that eliminates the need for hosting by embedding a complete peer-to-peer networking stack into a single executable. The architecture is organized into seven interconnected systems:
+p2p-webapp is a local backend that eliminates the need for hosting by embedding a complete peer-to-peer networking stack with IPFS file storage into a single executable. The architecture is organized into seven interconnected systems:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -190,6 +190,21 @@ Browser ← WebSocket ← WebSocketHandler ← PeerManager
 - Optional delivery acknowledgment with callbacks
 - All retry logic and buffering handled server-side
 
+**IPFS File Storage**:
+- Each peer maintains a HAMTDirectory (Hash Array Mapped Trie Directory)
+- Directory structure stored in IPFS, identified by root CID
+- Supports hierarchical file organization with Unix-style paths
+- Files and directories are content-addressed (immutable)
+- Peer pins its root directory to prevent garbage collection
+- Directory state can be restored across sessions using root CID
+
+**File Operations**:
+- `listFiles(peerID)` - List files in peer's directory (local or remote)
+- `getFile(cid)` - Retrieve content by CID from IPFS network
+- `storeFile(path, content, directory)` - Add files/directories to peer's tree
+- `removeFile(path)` - Remove entries from peer's directory
+- Reserved `p2p-webapp` protocol for peer-to-peer file list requests
+
 ---
 
 ### 4. HTTP Server System
@@ -257,7 +272,7 @@ Request → Has extension?
 - Maintain PID file with file locking
 - Verify PIDs are actual p2p-webapp instances
 - Clean stale entries automatically
-- Support ps/kill/killall commands
+- Support ps/kill/killall commands with graceful shutdown (SIGTERM→SIGKILL)
 
 **Key Classes**: `ProcessTracker`
 
@@ -311,8 +326,8 @@ Request → Has extension?
 - `ls`: List bundled files
 - `cp`: Copy files from bundle
 - `ps`: List running instances
-- `kill PID`: Terminate specific instance
-- `killall`: Terminate all instances
+- `kill PID`: Terminate specific instance (SIGTERM first, SIGKILL after 5s if needed)
+- `killall`: Terminate all instances (SIGTERM first, SIGKILL after 5s if needed)
 - `version`: Display version
 
 ---

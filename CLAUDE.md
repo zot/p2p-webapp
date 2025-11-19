@@ -106,26 +106,33 @@ make clean
 
 ## 🧪 Testing with Playwright
 When testing with Playwright MCP:
-1. **ALWAYS check for running instances BEFORE starting tests**
+
+1. **Start the server for testing:**
+   ```bash
+   # Run with bundled demo (recommended for testing)
+   ./p2p-webapp --noopen --linger -vv
+
+   # Flags explained:
+   # --noopen: Don't auto-open browser
+   # --linger: Keep server running after WebSocket connections close
+   # -v, -vv, -vvv: Verbosity levels (1, 2, or 3)
+   ```
+
+2. **ALWAYS check for running instances BEFORE starting tests**
    ```bash
    pgrep -a p2p-webapp  # Check for any running instances
-   kill -9 <PID>         # Kill if found
+   kill <PID>           # Kill if found
    ```
-2. **Always use an empty tmp directory** for the extract command
-   ```bash
-   cd /tmp/ipfs-extract-test && rm -rf * && /path/to/p2p-webapp extract --noopen -v
-   ```
+
 3. **Track and kill processes properly**
    - **IMPORTANT**: DO NOT use `ps aux | grep p2p-webapp` to find the PID!
      - This grep pattern will match BOTH the p2p-webapp binary AND the Claude process
      - The Claude process command line contains the working directory path which includes "p2p-webapp"
      - Using this pattern with kill will accidentally kill Claude too!
    - **Safe alternatives**:
-     - Use `pgrep -f "p2p-webapp extract"` to find only the actual binary
      - Use `pgrep p2p-webapp` to find by process name only
-     - Capture the PID when starting: `./p2p-webapp extract --noopen -v & echo $!`
-   - Kill and verify: `kill <PID> && sleep 1 && ps -p <PID>`
-   - The `extract` command requires an empty directory or it will fail
+     - Capture the PID when starting in background: `./p2p-webapp --noopen --linger -vv & echo $!`
+   - Kill and verify: `kill <PID> && sleep 1 && pgrep p2p-webapp`
 
 The build process:
 1. Checks and installs TypeScript dependencies if `node_modules` is missing

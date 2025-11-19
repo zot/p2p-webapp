@@ -24,6 +24,13 @@
             color: white;
             padding: 1rem;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header .header-left {
+            flex: 1;
         }
 
         header h1 {
@@ -35,6 +42,21 @@
             font-size: 0.875rem;
             opacity: 0.8;
             font-family: monospace;
+        }
+
+        #browse-files-btn {
+            padding: 0.5rem 1rem;
+            background: #16a085;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: background 0.2s;
+        }
+
+        #browse-files-btn:hover {
+            background: #138d75;
         }
 
         .status {
@@ -229,12 +251,192 @@
         .peer-item.active .peer-id {
             opacity: 0.8;
         }
+
+        /* File Browser Modal */
+        #file-browser-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #file-browser-modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .modal-header {
+            background: #2c3e50;
+            color: white;
+            padding: 1rem;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.25rem;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        .modal-toolbar {
+            padding: 1rem;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .modal-toolbar select {
+            flex: 1;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.875rem;
+        }
+
+        .modal-toolbar button {
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+        }
+
+        .file-tree-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+        }
+
+        .file-tree-item {
+            padding: 0.5rem;
+            margin: 0.25rem 0;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: background 0.2s;
+        }
+
+        .file-tree-item:hover {
+            background: #f8f9fa;
+        }
+
+        .file-tree-item.directory {
+            font-weight: 500;
+        }
+
+        .file-tree-item.selected {
+            background: #e3f2fd;
+            border-left: 3px solid #2196f3;
+        }
+
+        .file-tree-item .icon {
+            width: 20px;
+            text-align: center;
+        }
+
+        .file-tree-item .expand-icon {
+            width: 16px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .file-tree-item .name {
+            flex: 1;
+        }
+
+        .file-tree-item .cid {
+            font-size: 0.75rem;
+            font-family: monospace;
+            opacity: 0.6;
+        }
+
+        .file-tree-item .actions {
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .file-tree-item .action-btn {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            background: #3498db;
+        }
+
+        .file-tree-item .action-btn:hover {
+            background: #2980b9;
+        }
+
+        .file-tree-children {
+            margin-left: 1.5rem;
+        }
+
+        .file-tree-item.collapsed > .file-tree-children {
+            display: none;
+        }
+
+        #drop-zone {
+            border: 2px dashed #ddd;
+            border-radius: 4px;
+            padding: 2rem;
+            text-align: center;
+            margin-bottom: 1rem;
+            color: #999;
+        }
+
+        #drop-zone.drag-over {
+            border-color: #3498db;
+            background: #ecf0f1;
+            color: #3498db;
+        }
+
+        .hidden {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
     <header>
-        <h1>P2P Chatroom Demo</h1>
-        <div id="peer-id">Connecting...</div>
+        <div class="header-left">
+            <h1>P2P Chatroom Demo</h1>
+            <div id="peer-id">Connecting...</div>
+        </div>
+        <button id="browse-files-btn" disabled>Browse My Files</button>
     </header>
 
     <div id="status" class="status connecting">Connecting to server...</div>
@@ -259,6 +461,33 @@
         </div>
     </main>
 
+    <!-- File Browser Modal -->
+    <div id="file-browser-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>File Browser</h2>
+                <button class="modal-close" id="modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-toolbar">
+                <select id="peer-selector">
+                    <option value="me">My Files</option>
+                </select>
+                <button id="upload-file-btn">Upload File</button>
+                <button id="create-dir-btn">New Folder</button>
+            </div>
+            <div id="selected-folder-indicator" style="padding: 0.5rem 1rem; background: #e3f2fd; border-bottom: 1px solid #ddd; font-size: 0.875rem; display: none;">
+                <strong>Upload target:</strong> <span id="selected-folder-path">/</span>
+            </div>
+            <div class="file-tree-container">
+                <div id="drop-zone" class="hidden">
+                    Drop files here to upload
+                </div>
+                <div id="file-tree"></div>
+            </div>
+            <input type="file" id="file-input" class="hidden" multiple>
+        </div>
+    </div>
+
     <script type="module">
         // Import the connect function from the built library
         import { connect } from './index.js';
@@ -281,6 +510,24 @@
         let peers = new Map(); // peerID -> { name }
         let dmMessages = new Map(); // peerID -> [{text, isOwn, timestamp}]
         let roomMessages = []; // Store room messages: [{senderPeerID, text, isOwn, timestamp}]
+
+        // File browser state
+        const fileBrowserModal = document.getElementById('file-browser-modal');
+        const browseFilesBtn = document.getElementById('browse-files-btn');
+        const modalCloseBtn = document.getElementById('modal-close-btn');
+        const peerSelector = document.getElementById('peer-selector');
+        const fileTreeDiv = document.getElementById('file-tree');
+        const uploadFileBtn = document.getElementById('upload-file-btn');
+        const createDirBtn = document.getElementById('create-dir-btn');
+        const fileInput = document.getElementById('file-input');
+        const dropZone = document.getElementById('drop-zone');
+        const selectedFolderIndicator = document.getElementById('selected-folder-indicator');
+        const selectedFolderPath = document.getElementById('selected-folder-path');
+
+        let currentFilePeerID = null; // Peer whose files we're viewing
+        let currentFileEntries = {}; // Current file tree entries
+        let expandedDirs = new Set(); // Track expanded directories
+        let selectedFolder = ''; // Currently selected folder path ('' = root)
 
         function storeRoomMessage(senderPeerID, text, isOwn) {
             roomMessages.push({
@@ -314,7 +561,7 @@
             if (!isSystem) {
                 const peerDiv = document.createElement('div');
                 peerDiv.className = 'peer';
-                peerDiv.textContent = isOwn ? 'You' : `Peer: ${peerID.substring(0, 8)}...`;
+                peerDiv.textContent = isOwn ? 'You' : `Peer: ...${peerID.slice(-8)}`;
                 messageDiv.appendChild(peerDiv);
             }
 
@@ -345,8 +592,10 @@
 
             if (mode === 'room') {
                 modeIndicator.textContent = 'Chat room';
+                browseFilesBtn.textContent = 'Browse My Files';
             } else {
-                modeIndicator.textContent = `Direct message: ${targetPeerID.substring(0, 8)}...`;
+                modeIndicator.textContent = `Direct message: ...${targetPeerID.slice(-8)}`;
+                browseFilesBtn.textContent = 'Browse Peer\'s Files';
             }
 
             // Update active state in peer list
@@ -365,7 +614,7 @@
                 addMessage('', 'Switched to room chat', false, true);
                 displayStoredRoomMessages();
             } else {
-                addMessage('', `Direct messaging with ${targetPeerID.substring(0, 8)}...`, false, true);
+                addMessage('', `Direct messaging with ...${targetPeerID.slice(-8)}`, false, true);
             }
         }
 
@@ -383,7 +632,7 @@
 
             const idDiv = document.createElement('div');
             idDiv.className = 'peer-id';
-            idDiv.textContent = peerID.substring(0, 16) + '...';
+            idDiv.textContent = '...' + peerID.slice(-16);
 
             peerItem.appendChild(nameDiv);
             peerItem.appendChild(idDiv);
@@ -393,6 +642,12 @@
             });
 
             peerList.appendChild(peerItem);
+
+            // Add to peer selector
+            const option = document.createElement('option');
+            option.value = peerID;
+            option.textContent = name || `Peer ...${peerID.slice(-8)}`;
+            peerSelector.appendChild(option);
         }
 
         function removePeerFromList(peerID) {
@@ -400,6 +655,12 @@
             if (peerItem && !peerItem.classList.contains('room')) {
                 peerItem.remove();
                 peers.delete(peerID);
+
+                // Remove from peer selector
+                const option = peerSelector.querySelector(`option[value="${peerID}"]`);
+                if (option) {
+                    option.remove();
+                }
 
                 // If we were DMing with this peer, switch back to room
                 if (currentMode === 'dm' && currentPeerID === peerID) {
@@ -429,6 +690,294 @@
                 updateMode('dm', peerID);
                 displayStoredMessages(peerID);
         }
+
+        // File browser functions
+        function updateSelectedFolderIndicator() {
+            const isOwnFiles = currentFilePeerID === client.peerID;
+            if (isOwnFiles && selectedFolder) {
+                selectedFolderIndicator.style.display = 'block';
+                selectedFolderPath.textContent = '/' + selectedFolder;
+            } else {
+                selectedFolderIndicator.style.display = 'none';
+            }
+        }
+
+        function buildFileTree(entries) {
+            // Build hierarchical tree from flat pathname entries
+            const tree = {};
+
+            for (const [path, entry] of Object.entries(entries)) {
+                const parts = path.split('/');
+                let current = tree;
+
+                for (let i = 0; i < parts.length; i++) {
+                    const part = parts[i];
+                    const isLast = i === parts.length - 1;
+
+                    if (isLast) {
+                        current[part] = { ...entry, path };
+                    } else {
+                        if (!current[part]) {
+                            current[part] = { type: 'directory', children: {} };
+                        }
+                        current = current[part].children || (current[part].children = {});
+                    }
+                }
+            }
+
+            return tree;
+        }
+
+        function renderFileTree(tree, container, pathPrefix = '') {
+            container.innerHTML = '';
+
+            // Update selected folder indicator when rendering root
+            if (pathPrefix === '' && container === fileTreeDiv) {
+                updateSelectedFolderIndicator();
+            }
+
+            if (Object.keys(tree).length === 0) {
+                container.innerHTML = '<div style="padding: 1rem; text-align: center; color: #999;">No files</div>';
+                return;
+            }
+
+            const sortedEntries = Object.entries(tree).sort(([a], [b]) => {
+                // Directories first, then files
+                const aIsDir = tree[a].type === 'directory';
+                const bIsDir = tree[b].type === 'directory';
+                if (aIsDir && !bIsDir) return -1;
+                if (!aIsDir && bIsDir) return 1;
+                return a.localeCompare(b);
+            });
+
+            for (const [name, entry] of sortedEntries) {
+                const itemPath = pathPrefix ? `${pathPrefix}/${name}` : name;
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'file-tree-item' + (entry.type === 'directory' ? ' directory' : '');
+
+                if (entry.type === 'directory') {
+                    const isExpanded = expandedDirs.has(itemPath);
+                    const isSelected = selectedFolder === itemPath;
+                    itemDiv.classList.toggle('collapsed', !isExpanded);
+                    itemDiv.classList.toggle('selected', isSelected);
+
+                    // Click folder to select it
+                    itemDiv.onclick = (e) => {
+                        // Don't select if clicking expand icon
+                        if (e.target.classList.contains('expand-icon')) {
+                            return;
+                        }
+                        selectedFolder = itemPath;
+                        renderFileTree(currentFileEntries, fileTreeDiv);
+                    };
+
+                    const expandIcon = document.createElement('span');
+                    expandIcon.className = 'expand-icon';
+                    expandIcon.textContent = isExpanded ? '▼' : '▶';
+                    expandIcon.onclick = (e) => {
+                        e.stopPropagation();
+                        if (expandedDirs.has(itemPath)) {
+                            expandedDirs.delete(itemPath);
+                        } else {
+                            expandedDirs.add(itemPath);
+                        }
+                        renderFileTree(currentFileEntries, fileTreeDiv);
+                    };
+                    itemDiv.appendChild(expandIcon);
+                }
+
+                const icon = document.createElement('span');
+                icon.className = 'icon';
+                icon.textContent = entry.type === 'directory' ? '📁' : '📄';
+                itemDiv.appendChild(icon);
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'name';
+                nameSpan.textContent = name;
+                itemDiv.appendChild(nameSpan);
+
+                if (entry.cid) {
+                    const cidSpan = document.createElement('span');
+                    cidSpan.className = 'cid';
+                    cidSpan.textContent = '...' + entry.cid.slice(-12);
+                    itemDiv.appendChild(cidSpan);
+
+                    // Add download button for files
+                    if (entry.type === 'file') {
+                        const actions = document.createElement('div');
+                        actions.className = 'actions';
+
+                        const downloadBtn = document.createElement('button');
+                        downloadBtn.className = 'action-btn';
+                        downloadBtn.textContent = 'Download';
+                        downloadBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            downloadFile(entry.cid, name);
+                        };
+                        actions.appendChild(downloadBtn);
+                        itemDiv.appendChild(actions);
+                    }
+                }
+
+                container.appendChild(itemDiv);
+
+                // Render children if directory and expanded
+                if (entry.type === 'directory' && entry.children) {
+                    const childrenDiv = document.createElement('div');
+                    childrenDiv.className = 'file-tree-children';
+                    renderFileTree(entry.children, childrenDiv, itemPath);
+                    container.appendChild(childrenDiv);
+                }
+            }
+        }
+
+        async function loadPeerFiles(peerID) {
+            // Only reset selection when actually switching to a different peer
+            if (currentFilePeerID !== peerID) {
+                selectedFolder = '';
+            }
+            currentFilePeerID = peerID;
+            fileTreeDiv.innerHTML = '<div style="padding: 1rem; text-align: center; color: #999;">Loading...</div>';
+
+            try {
+                const result = await client.listFiles(peerID);
+                currentFileEntries = buildFileTree(result.entries);
+                renderFileTree(currentFileEntries, fileTreeDiv);
+
+                // Update UI based on whether viewing own files
+                const isOwnFiles = peerID === client.peerID;
+                uploadFileBtn.disabled = !isOwnFiles;
+                createDirBtn.disabled = !isOwnFiles;
+                dropZone.classList.toggle('hidden', !isOwnFiles);
+            } catch (error) {
+                console.error('Failed to load files:', error);
+                fileTreeDiv.innerHTML = '<div style="padding: 1rem; text-align: center; color: #e74c3c;">Failed to load files</div>';
+            }
+        }
+
+        async function downloadFile(cid, filename) {
+            try {
+                const content = await client.getFile(cid);
+
+                if (content.type === 'file') {
+                    // Decode base64 content and trigger download
+                    const binaryString = atob(content.content);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+
+                    const blob = new Blob([bytes], { type: content.mimeType || 'application/octet-stream' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                } else {
+                    alert('Cannot download directory');
+                }
+            } catch (error) {
+                console.error('Failed to download file:', error);
+                alert('Failed to download file');
+            }
+        }
+
+        async function uploadFiles(files) {
+            for (const file of files) {
+                try {
+                    const content = await file.arrayBuffer();
+                    const uint8Array = new Uint8Array(content);
+                    // Prefix with selected folder path
+                    const filePath = selectedFolder ? `${selectedFolder}/${file.name}` : file.name;
+                    await client.storeFile(filePath, uint8Array, false);
+                } catch (error) {
+                    console.error(`Failed to upload ${file.name}:`, error);
+                    alert(`Failed to upload ${file.name}`);
+                }
+            }
+
+            // Expand the selected folder so uploaded files are visible
+            if (selectedFolder) {
+                expandedDirs.add(selectedFolder);
+            }
+
+            // Reload file list
+            await loadPeerFiles(client.peerID);
+        }
+
+        async function createDirectory() {
+            const dirName = prompt('Enter directory name:');
+            if (!dirName) return;
+
+            try {
+                // Prefix with selected folder path
+                const dirPath = selectedFolder ? `${selectedFolder}/${dirName}` : dirName;
+                console.log('Creating directory:', dirPath);
+                await client.storeFile(dirPath, null, true);
+
+                // Select the newly created directory and expand it
+                selectedFolder = dirPath;
+                expandedDirs.add(dirPath);
+                console.log('Set selectedFolder to:', selectedFolder);
+                console.log('Before loadPeerFiles, currentFilePeerID:', currentFilePeerID);
+
+                await loadPeerFiles(client.peerID);
+                console.log('After loadPeerFiles, selectedFolder:', selectedFolder);
+            } catch (error) {
+                console.error('Failed to create directory:', error);
+                alert('Failed to create directory');
+            }
+        }
+
+        // File browser event handlers
+        browseFilesBtn.addEventListener('click', () => {
+            fileBrowserModal.classList.add('active');
+            const peerID = currentMode === 'dm' ? currentPeerID : client.peerID;
+            peerSelector.value = peerID === client.peerID ? 'me' : peerID;
+            loadPeerFiles(peerID);
+        });
+
+        modalCloseBtn.addEventListener('click', () => {
+            fileBrowserModal.classList.remove('active');
+        });
+
+        peerSelector.addEventListener('change', (e) => {
+            const value = e.target.value;
+            const peerID = value === 'me' ? client.peerID : value;
+            loadPeerFiles(peerID);
+        });
+
+        uploadFileBtn.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                uploadFiles(Array.from(e.target.files));
+                e.target.value = ''; // Reset input
+            }
+        });
+
+        createDirBtn.addEventListener('click', createDirectory);
+
+        // Drag and drop support
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+
+            const files = Array.from(e.dataTransfer.files);
+            uploadFiles(files);
+        });
 
         async function sendMessage() {
             const text = messageInput.value.trim();
@@ -502,8 +1051,8 @@
                         if (peerID === client.peerID) return; // Skip ourselves
 
                         if (joined) {
-                            addPeerToList(peerID, `Peer ${peerID.substring(0, 8)}`);
-                            peers.set(peerID, { name: `Peer ${peerID.substring(0, 8)}` });
+                            addPeerToList(peerID, `Peer ...${peerID.slice(-8)}`);
+                            peers.set(peerID, { name: `Peer ...${peerID.slice(-8)}` });
                         } else {
                             removePeerFromList(peerID);
                         }
@@ -515,8 +1064,8 @@
                     const peerIDs = await client.listPeers(ROOM_TOPIC);
                     for (const peerID of peerIDs) {
                         if (peerID !== client.peerID) {
-                            addPeerToList(peerID, `Peer ${peerID.substring(0, 8)}`);
-                            peers.set(peerID, { name: `Peer ${peerID.substring(0, 8)}` });
+                            addPeerToList(peerID, `Peer ...${peerID.slice(-8)}`);
+                            peers.set(peerID, { name: `Peer ...${peerID.slice(-8)}` });
                         }
                     }
                 } catch (error) {
@@ -525,6 +1074,7 @@
 
                 messageInput.disabled = false;
                 sendButton.disabled = false;
+                browseFilesBtn.disabled = false;
                 messageInput.focus();
 
                 addMessage('', 'Welcome to the P2P chatroom! Your messages are distributed peer-to-peer.', false, true);

@@ -1,4 +1,4 @@
-import { ProtocolDataCallback, TopicDataCallback, PeerChangeCallback, AckCallback } from './types.js';
+import { FileEntry, FileContent, ProtocolDataCallback, TopicDataCallback, PeerChangeCallback } from './types.js';
 export declare class P2PWebAppClient {
     private ws;
     private _peerID;
@@ -11,7 +11,9 @@ export declare class P2PWebAppClient {
     private messageQueue;
     private processingMessage;
     private nextAckNumber;
-    private ackCallbacks;
+    private ackPending;
+    private fileListPending;
+    private getFilePending;
     /**
      * Connect to the WebSocket server and initialize peer identity
      * @param peerKey Optional peer key to restore previous identity
@@ -37,9 +39,9 @@ export declare class P2PWebAppClient {
      * @param peer Target peer ID
      * @param protocol Protocol name
      * @param data Data to send
-     * @param onAck Optional callback invoked when delivery is confirmed
+     * @returns Promise that resolves when delivery is confirmed
      */
-    send(peer: string, protocol: string, data: any, onAck?: AckCallback): Promise<void>;
+    send(peer: string, protocol: string, data: any): Promise<void>;
     /**
      * Subscribe to a topic with data listener and optional peer change listener
      * Automatically monitors the topic for peer join/leave events if onPeerChange is provided
@@ -58,25 +60,29 @@ export declare class P2PWebAppClient {
      */
     listPeers(topic: string): Promise<string[]>;
     /**
-     * List files stored for this peer
-     * @returns Map of file paths to CIDs
+     * List files for a peer
+     * @param peerid Peer ID whose files to list
+     * @returns Promise resolving with {rootCID, entries}
      */
-    listFiles(): Promise<{
-        [path: string]: string;
+    listFiles(peerid: string): Promise<{
+        rootCID: string;
+        entries: {
+            [path: string]: FileEntry;
+        };
     }>;
     /**
-     * Get file content by CID
-     * @param cid Content identifier of the file
-     * @returns File content as Uint8Array
+     * Get file or directory content by CID
+     * @param cid Content identifier
+     * @returns Promise resolving with file content or rejecting on error
      */
-    getFile(cid: string): Promise<Uint8Array>;
+    getFile(cid: string): Promise<FileContent>;
     /**
-     * Store file content for this peer
+     * Store file or directory for this peer
      * @param path File path identifier
-     * @param content File content as Uint8Array
-     * @returns CID of the stored file
+     * @param content File content as Uint8Array (null for directories)
+     * @param directory true = create directory, false = create file
      */
-    storeFile(path: string, content: Uint8Array): Promise<string>;
+    storeFile(path: string, content: Uint8Array | null, directory: boolean): Promise<void>;
     /**
      * Remove a file from this peer's storage
      * @param path File path identifier

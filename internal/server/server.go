@@ -39,6 +39,7 @@ type Server struct {
 	linger         bool
 	exitTimer      *time.Timer
 	exitTimerMu    sync.Mutex
+	verbosity      int
 }
 
 // zipFileSystem implements http.FileSystem for serving files from a ZIP archive
@@ -123,7 +124,7 @@ func (zf *zipFile) Stat() (os.FileInfo, error) {
 // NewServerFromDir creates a new HTTP server serving from a filesystem directory
 // CRC: crc-Server.md
 // Sequence: seq-server-startup.md
-func NewServerFromDir(ctx context.Context, pm *peer.Manager, htmlDir string, port int, linger bool) *Server {
+func NewServerFromDir(ctx context.Context, pm *peer.Manager, htmlDir string, port int, linger bool, verbosity int) *Server {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Server{
 		ctx:            ctx,
@@ -134,6 +135,7 @@ func NewServerFromDir(ctx context.Context, pm *peer.Manager, htmlDir string, por
 		connections:    make(map[*WSConnection]bool),
 		peerConnection: make(map[string]*WSConnection),
 		linger:         linger,
+		verbosity:      verbosity,
 	}
 
 	// Create protocol handler
@@ -149,13 +151,17 @@ func NewServerFromDir(ctx context.Context, pm *peer.Manager, htmlDir string, por
 		s.onPeerChange,
 	)
 
+	// Set file operation callbacks
+	pm.SetPeerFilesCallback(s.onPeerFiles)
+	pm.SetGotFileCallback(s.onGotFile)
+
 	return s
 }
 
 // NewServerFromBundle creates a new HTTP server serving from a bundled ZIP archive
 // CRC: crc-Server.md
 // Sequence: seq-server-startup.md
-func NewServerFromBundle(ctx context.Context, pm *peer.Manager, bundleReader *zip.Reader, port int, linger bool) *Server {
+func NewServerFromBundle(ctx context.Context, pm *peer.Manager, bundleReader *zip.Reader, port int, linger bool, verbosity int) *Server {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Server{
 		ctx:            ctx,
@@ -166,6 +172,7 @@ func NewServerFromBundle(ctx context.Context, pm *peer.Manager, bundleReader *zi
 		connections:    make(map[*WSConnection]bool),
 		peerConnection: make(map[string]*WSConnection),
 		linger:         linger,
+		verbosity:      verbosity,
 	}
 
 	// Create protocol handler
@@ -180,6 +187,10 @@ func NewServerFromBundle(ctx context.Context, pm *peer.Manager, bundleReader *zi
 		s.onTopicData,
 		s.onPeerChange,
 	)
+
+	// Set file operation callbacks
+	pm.SetPeerFilesCallback(s.onPeerFiles)
+	pm.SetGotFileCallback(s.onGotFile)
 
 	return s
 }
@@ -243,29 +254,82 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Stop stops the HTTP server
+// Stop stops the HTTP server and cleans up all resources
 // CRC: crc-Server.md
 func (s *Server) Stop() error {
+	if s.verbosity >= 3 {
+		fmt.Println("[DEBUG] Server.Stop() called")
+	}
+
 	// Cancel exit timer if running
+	if s.verbosity >= 3 {
+		fmt.Println("[DEBUG] Cancelling exit timer...")
+	}
 	s.cancelExitTimer()
 
 	// Close all WebSocket connections
-	s.mu.Lock()
-	for conn := range s.connections {
-		conn.Close()
+	// Copy connections to slice and release lock before closing to avoid deadlock
+	// (conn.Close() calls UnregisterPeer which tries to acquire s.mu)
+	if s.verbosity >= 3 {
+		s.mu.RLock()
+		connCount := len(s.connections)
+		s.mu.RUnlock()
+		fmt.Printf("[DEBUG] Closing %d WebSocket connections...\n", connCount)
 	}
+	s.mu.Lock()
+	connsToClose := make([]*WSConnection, 0, len(s.connections))
+	for conn := range s.connections {
+		connsToClose = append(connsToClose, conn)
+	}
+	s.connections = make(map[*WSConnection]bool) // Clear the map
+	s.peerConnection = make(map[string]*WSConnection) // Clear peer mappings
 	s.mu.Unlock()
 
-	// Stop HTTP server
+	// Now close connections without holding the lock
+	for _, conn := range connsToClose {
+		conn.Close()
+	}
+	if s.verbosity >= 3 {
+		fmt.Println("[DEBUG] WebSocket connections closed")
+	}
+
+	// Stop HTTP server with a fresh context (don't use s.ctx which may be cancelled)
 	var shutdownErr error
 	if s.httpServer != nil {
-		shutdownErr = s.httpServer.Shutdown(s.ctx)
+		if s.verbosity >= 3 {
+			fmt.Println("[DEBUG] Shutting down HTTP server...")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		shutdownErr = s.httpServer.Shutdown(ctx)
+		if s.verbosity >= 3 {
+			fmt.Println("[DEBUG] HTTP server shutdown complete")
+		}
+	}
+
+	// Shutdown peer manager (close all peers and DHT)
+	if s.peerManager != nil {
+		if s.verbosity >= 3 {
+			fmt.Println("[DEBUG] Shutting down peer manager...")
+		}
+		if err := s.peerManager.Shutdown(); err != nil {
+			fmt.Printf("Warning: failed to shutdown peer manager: %v\n", err)
+		}
+		if s.verbosity >= 3 {
+			fmt.Println("[DEBUG] Peer manager shutdown complete")
+		}
 	}
 
 	// Unregister from PID tracking file AFTER everything else is shut down
 	// This prevents race condition where ps shows no instances but process is still running
+	if s.verbosity >= 3 {
+		fmt.Println("[DEBUG] Unregistering PID...")
+	}
 	if err := pidfile.Unregister(); err != nil {
 		fmt.Printf("Warning: failed to unregister process: %v\n", err)
+	}
+	if s.verbosity >= 3 {
+		fmt.Println("[DEBUG] Server.Stop() complete")
 	}
 
 	return shutdownErr
@@ -507,6 +571,54 @@ func (s *Server) onSendAck(peerID string, ack int) {
 	if exists {
 		if err := conn.SendMessage(msg); err != nil {
 			fmt.Printf("Failed to send ack message to peer %s: %v\n", peerID, err)
+		}
+	}
+}
+
+func (s *Server) onPeerFiles(receiverPeerID, targetPeerID, dirCID string, entries map[string]any) {
+	// Convert entries to FileEntryInfo format
+	fileEntries := make(map[string]protocol.FileEntryInfo)
+	for path, entry := range entries {
+		if entryMap, ok := entry.(map[string]any); ok {
+			fileEntry := protocol.FileEntryInfo{}
+			if typ, ok := entryMap["type"].(string); ok {
+				fileEntry.Type = typ
+			}
+			if cid, ok := entryMap["cid"].(string); ok {
+				fileEntry.CID = cid
+			}
+			if mimeType, ok := entryMap["mimeType"].(string); ok {
+				fileEntry.MimeType = mimeType
+			}
+			fileEntries[path] = fileEntry
+		}
+	}
+
+	msg := s.handler.CreatePeerFilesMessage(targetPeerID, dirCID, fileEntries)
+
+	// Send only to the connection that owns the receiving peer
+	s.mu.RLock()
+	conn, exists := s.peerConnection[receiverPeerID]
+	s.mu.RUnlock()
+
+	if exists {
+		if err := conn.SendMessage(msg); err != nil {
+			fmt.Printf("Failed to send peerFiles message to peer %s: %v\n", receiverPeerID, err)
+		}
+	}
+}
+
+func (s *Server) onGotFile(receiverPeerID string, cid string, success bool, content any) {
+	msg := s.handler.CreateGotFileMessage(cid, success, content)
+
+	// Send only to the connection that owns the receiving peer
+	s.mu.RLock()
+	conn, exists := s.peerConnection[receiverPeerID]
+	s.mu.RUnlock()
+
+	if exists {
+		if err := conn.SendMessage(msg); err != nil {
+			fmt.Printf("Failed to send gotFile message to peer %s: %v\n", receiverPeerID, err)
 		}
 	}
 }

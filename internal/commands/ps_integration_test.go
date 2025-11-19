@@ -188,3 +188,155 @@ func TestPsRaceCondition(t *testing.T) {
 		t.Log("   - Consider this a PASS if no other errors")
 	}
 }
+
+// TestSignalHandling tests that SIGHUP, SIGINT, and SIGTERM all trigger graceful shutdown
+func TestSignalHandling(t *testing.T) {
+	// Skip if not running with -tags=integration
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	signals := []struct {
+		name   string
+		signal os.Signal
+	}{
+		{"SIGHUP", syscall.SIGHUP},
+		{"SIGINT", os.Interrupt},
+		{"SIGTERM", syscall.SIGTERM},
+	}
+
+	for _, tc := range signals {
+		tc := tc // Capture range variable
+		t.Run(tc.name, func(t *testing.T) {
+			// Clean up any existing instances
+			pidfile.KillAll()
+			time.Sleep(500 * time.Millisecond)
+
+			// Create temporary directory with required structure
+			tmpDir, err := ioutil.TempDir("", "p2p-webapp-signal-test-*")
+			if err != nil {
+				t.Fatalf("Failed to create temp dir: %v", err)
+			}
+			defer os.RemoveAll(tmpDir)
+
+			htmlDir := filepath.Join(tmpDir, "html")
+			if err := os.MkdirAll(htmlDir, 0755); err != nil {
+				t.Fatalf("Failed to create html dir: %v", err)
+			}
+
+			// Create minimal index.html
+			indexPath := filepath.Join(htmlDir, "index.html")
+			indexContent := `<!DOCTYPE html><html><head><title>Test</title></head><body>Test</body></html>`
+			if err := ioutil.WriteFile(indexPath, []byte(indexContent), 0644); err != nil {
+				t.Fatalf("Failed to create index.html: %v", err)
+			}
+
+			// Get path to p2p-webapp binary (assume it's built)
+			binaryPath := "../../../p2p-webapp"
+			if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+				t.Skipf("Binary not found at %s, run 'make build' first", binaryPath)
+			}
+
+			// Start server with context
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			cmd := exec.CommandContext(ctx, binaryPath, "--dir", tmpDir, "--noopen", "--linger", "-v")
+
+			// Capture output
+			output, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatalf("Failed to get stdout pipe: %v", err)
+			}
+
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("Failed to start server: %v", err)
+			}
+			defer func() {
+				if cmd.Process != nil {
+					cmd.Process.Kill()
+				}
+			}()
+
+			serverPID := int32(cmd.Process.Pid)
+			t.Logf("Started server with PID: %d", serverPID)
+
+			// Wait for server to be ready
+			outputBuf := make([]byte, 4096)
+			deadline := time.Now().Add(10 * time.Second)
+			serverReady := false
+			for time.Now().Before(deadline) {
+				n, _ := output.Read(outputBuf)
+				if n > 0 {
+					outputStr := string(outputBuf[:n])
+					if strings.Contains(outputStr, "Server started") {
+						serverReady = true
+						break
+					}
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+
+			if !serverReady {
+				t.Fatalf("Server did not start within timeout")
+			}
+			t.Logf("✓ Server is ready")
+
+			// Verify server is in ps
+			pids, err := pidfile.List()
+			if err != nil {
+				t.Fatalf("Failed to list PIDs: %v", err)
+			}
+
+			found := false
+			for _, pid := range pids {
+				if pid == serverPID {
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				t.Fatalf("Server PID %d not found in ps output: %v", serverPID, pids)
+			}
+			t.Logf("✓ Server PID %d found in ps", serverPID)
+
+			// Send the signal to trigger shutdown
+			if err := cmd.Process.Signal(tc.signal); err != nil {
+				t.Fatalf("Failed to send %s: %v", tc.name, err)
+			}
+			t.Logf("✓ Sent %s to server", tc.name)
+
+			// Wait for process to terminate
+			waitDone := make(chan error, 1)
+			go func() {
+				waitDone <- cmd.Wait()
+			}()
+
+			select {
+			case <-waitDone:
+				// Process terminated
+				t.Logf("✓ Server terminated gracefully after %s", tc.name)
+			case <-time.After(5 * time.Second):
+				t.Fatalf("Server did not terminate within 5 seconds after %s", tc.name)
+			}
+
+			// Give a small grace period for cleanup
+			time.Sleep(500 * time.Millisecond)
+
+			// Verify PID is removed from ps
+			pids, err = pidfile.List()
+			if err != nil {
+				t.Fatalf("Failed to list PIDs after shutdown: %v", err)
+			}
+
+			for _, pid := range pids {
+				if pid == serverPID {
+					t.Errorf("❌ Server PID %d still in ps after shutdown", serverPID)
+				}
+			}
+			t.Logf("✓ Server PID removed from ps after shutdown")
+			t.Logf("✅ %s triggered graceful shutdown successfully", tc.name)
+		})
+	}
+}

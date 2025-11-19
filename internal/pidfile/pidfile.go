@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/shirou/gopsutil/v3/process"
 )
@@ -181,6 +182,7 @@ func List() ([]int32, error) {
 }
 
 // Kill terminates a specific PID if it's a valid p2p-webapp process
+// Uses graceful shutdown: SIGTERM first, wait 5s, then SIGKILL if needed
 // CRC: crc-ProcessTracker.md
 func Kill(pid int32) error {
 	mu.Lock()
@@ -190,14 +192,36 @@ func Kill(pid int32) error {
 		return fmt.Errorf("PID %d is not a running p2p-webapp process", pid)
 	}
 
-	// Kill the process
+	// Get the process
 	proc, err := process.NewProcess(pid)
 	if err != nil {
 		return fmt.Errorf("failed to get process: %w", err)
 	}
 
-	if err := proc.Kill(); err != nil {
-		return fmt.Errorf("failed to kill process: %w", err)
+	// First try graceful shutdown with SIGTERM
+	if err := proc.Terminate(); err != nil {
+		// If terminate fails, try SIGKILL immediately
+		if err := proc.Kill(); err != nil {
+			return fmt.Errorf("failed to kill process: %w", err)
+		}
+	} else {
+		// Wait up to 5 seconds for process to exit
+		for i := 0; i < 50; i++ {
+			running, err := proc.IsRunning()
+			if err != nil || !running {
+				// Process has exited
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+
+		// If still running after 5 seconds, force kill
+		running, err := proc.IsRunning()
+		if err == nil && running {
+			if err := proc.Kill(); err != nil {
+				return fmt.Errorf("failed to force kill process: %w", err)
+			}
+		}
 	}
 
 	// Remove from tracking file (best-effort)
@@ -215,6 +239,7 @@ func Kill(pid int32) error {
 }
 
 // KillAll terminates all tracked p2p-webapp processes
+// Uses graceful shutdown: SIGTERM first, wait 5s, then SIGKILL if needed
 func KillAll() (int, error) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -229,18 +254,41 @@ func KillAll() (int, error) {
 		return 0, err
 	}
 
-	killed := 0
+	// Send SIGTERM to all processes
+	procs := make(map[int32]*process.Process)
 	for _, pid := range toKill {
 		proc, err := process.NewProcess(pid)
 		if err != nil {
 			continue
 		}
-		if err := proc.Kill(); err == nil {
-			killed++
+		if err := proc.Terminate(); err == nil {
+			procs[pid] = proc
 		}
 	}
 
-	return killed, nil
+	// Wait up to 5 seconds for all processes to exit
+	for i := 0; i < 50; i++ {
+		allExited := true
+		for pid, proc := range procs {
+			running, err := proc.IsRunning()
+			if err != nil || !running {
+				delete(procs, pid)
+			} else {
+				allExited = false
+			}
+		}
+		if allExited {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Force kill any processes still running after 5 seconds
+	for _, proc := range procs {
+		proc.Kill()
+	}
+
+	return len(toKill), nil
 }
 
 // GetProcessInfo returns PID and command line for a process

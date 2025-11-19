@@ -9,8 +9,9 @@
 1. [TypeScript Client Library](#typescript-client-library)
 2. [WebSocket Protocol](#websocket-protocol)
 3. [Message Types](#message-types)
-4. [Error Handling](#error-handling)
-5. [Examples](#examples)
+4. [File Operations](#file-operations)
+5. [Error Handling](#error-handling)
+6. [Examples](#examples)
 
 ---
 
@@ -31,7 +32,7 @@ This copies:
 ### Import
 
 ```typescript
-import { connect, start, stop, send, subscribe, publish, unsubscribe, listPeers } from './client.js';
+import { connect, start, stop, send, subscribe, publish, unsubscribe, listPeers, listFiles, getFile, storeFile, removeFile } from './client.js';
 ```
 
 Or with named export:
@@ -44,12 +45,13 @@ import * as P2P from './client.js';
 
 ### Core API
 
-#### `connect(peerKey?: string): Promise<[string, string]>`
+#### `connect(peerKey?: string, rootDirectory?: string): Promise<[string, string]>`
 
 Connect to p2p-webapp server and initialize peer.
 
 **Parameters**:
 - `peerKey` (optional) - Existing peer key to reuse identity. If omitted, generates new key.
+- `rootDirectory` (optional) - CID of peer's root directory to restore file state. If omitted, starts with empty directory.
 
 **Returns**: Promise resolving to `[peerID, peerKey]`
 - `peerID` - Unique identifier for this peer
@@ -105,7 +107,7 @@ await start('chat', (peer, data) => {
 
 ---
 
-#### `send(peer: string, protocol: string, data: any, onAck?: AckCallback): Promise<void>`
+#### `send(peer: string, protocol: string, data: any): Promise<void>`
 
 Send data to peer on protocol.
 
@@ -113,28 +115,30 @@ Send data to peer on protocol.
 - `peer` - Target peer ID
 - `protocol` - Protocol identifier
 - `data` - Any JSON-serializable data
-- `onAck` (optional) - Callback invoked when delivery confirmed: `() => void | Promise<void>`
 
-**Returns**: Promise resolving when request sent (NOT when delivered)
+**Returns**: Promise resolving when delivery confirmed (ack received)
 
 **Throws**: Error if protocol not started
 
 **Example**:
 ```typescript
-// Send without ack
+// Send and wait for delivery confirmation
 await send(peerID, 'chat', { text: 'Hello!' });
+console.log('Message delivered');
 
-// Send with delivery confirmation
-await send(peerID, 'chat', { text: 'Important!' }, () => {
-  console.log('Message delivered');
+// Or handle delivery in try/catch
+try {
+  await send(peerID, 'chat', { text: 'Important!' });
   showDeliveryCheckmark();
-});
+} catch (error) {
+  console.error('Delivery failed:', error);
+}
 ```
 
 **Notes**:
 - Protocol must be started first with `start()`
 - Server manages connection lifecycle transparently
-- `onAck` callback provides delivery confirmation
+- Promise resolves when peer acknowledges receipt
 - Ack numbers managed internally (transparent to caller)
 - Server creates stream on-demand, reuses for subsequent messages
 
@@ -268,13 +272,200 @@ console.log(`${peers.length} peers in room:`, peers);
 
 ---
 
+### File Operations API
+
+Each peer maintains a HAMTDirectory (Hash Array Mapped Trie Directory) structure in IPFS for organizing files. The directory is identified by a CID (Content Identifier) and can be restored across sessions using the `rootDirectory` parameter in `connect()`.
+
+#### `listFiles(peerID: string): Promise<{rootCID: string, entries: FileEntries}>`
+
+Request list of files from a peer's directory.
+
+**Parameters**:
+- `peerID` - Peer ID to list files from (can be self or another peer)
+
+**Returns**: Promise resolving with object containing:
+- `rootCID` - CID of the peer's root directory
+- `entries` - Object mapping pathnames to file/directory entries
+
+**Entry Format**:
+```typescript
+{
+  "path/to/file.txt": {
+    type: "file",
+    cid: "QmXg9Pp2ytZ...",
+    mimeType: "text/plain"
+  },
+  "path/to/directory": {
+    type: "directory",
+    cid: "QmYwAPJzv5C..."
+  }
+}
+```
+
+**Example**:
+```typescript
+const { rootCID, entries } = await listFiles(peerID);
+console.log(`Root directory CID: ${rootCID}`);
+console.log(`Files from ${peerID}:`);
+
+for (const [path, entry] of Object.entries(entries)) {
+  if (entry.type === 'file') {
+    console.log(`  📄 ${path} (${entry.mimeType})`);
+  } else {
+    console.log(`  📁 ${path}/`);
+  }
+}
+```
+
+**Notes**:
+- For local peer, response is immediate
+- For remote peer, sends request via reserved `p2p-webapp` protocol
+- Multiple concurrent requests to same peer are deduplicated
+- Internally uses `peerFiles` server push message to resolve promise
+
+---
+
+#### `getFile(cid: string): Promise<FileContent>`
+
+Retrieve IPFS content by CID.
+
+**Parameters**:
+- `cid` - Content identifier to retrieve
+
+**Returns**: Promise resolving with file content
+
+**Content Format**:
+```typescript
+// File
+{
+  type: "file",
+  mimeType: "text/plain",
+  content: "base64-encoded-string"
+}
+
+// Directory
+{
+  type: "directory",
+  entries: {
+    "filename.txt": "QmCID1...",
+    "subdir": "QmCID2..."
+  }
+}
+```
+
+**Example**:
+```typescript
+try {
+  const content = await getFile(cid);
+
+  if (content.type === 'file') {
+    const decoded = atob(content.content);
+    displayFile(decoded, content.mimeType);
+  } else if (content.type === 'directory') {
+    console.log('Directory entries:', content.entries);
+  }
+} catch (error) {
+  console.error('Failed to retrieve:', error);
+}
+```
+
+**Notes**:
+- **Why base64 encoding?** Binary files (images, PDFs, executables, etc.) contain arbitrary bytes that aren't valid UTF-8. Since JSON can only safely encode UTF-8 strings, base64 encoding is required to transmit binary data without corruption. Do NOT remove this encoding - it's essential for binary file support.
+- Promise rejects on retrieval failure
+- Can retrieve content from any peer's files via their CIDs
+- Internally uses `gotFile` server push message to resolve promise
+
+---
+
+#### `storeFile(path: string, content: string | null, isDirectory: boolean): Promise<void>`
+
+Store file or directory in peer's IPFS directory.
+
+**Parameters**:
+- `path` - Unix-style path relative to root (e.g., "docs/readme.txt")
+- `content` - File content as Uint8Array, or null for directories
+- `isDirectory` - true for directory, false for file
+
+**Returns**: Promise resolving when stored
+
+**Throws**: Error if directory=false but content is null
+
+**Example**:
+```typescript
+// Create directory
+await storeFile('docs', null, true);
+
+// Store file
+const encoder = new TextEncoder();
+const content = encoder.encode('Hello, world!');
+await storeFile('docs/readme.txt', content, false);
+```
+
+**Notes**:
+- Content is automatically base64-encoded before transmission to support binary files
+- Automatically creates parent directories if needed
+- Updates peer's root directory CID after store
+- New CID should be saved for restoring directory state
+
+---
+
+#### `removeFile(path: string): Promise<void>`
+
+Remove file or directory from peer's directory.
+
+**Parameters**:
+- `path` - Unix-style path to remove
+
+**Returns**: Promise resolving when removed
+
+**Example**:
+```typescript
+await removeFile('docs/readme.txt');
+```
+
+**Notes**:
+- Removes entry from parent directory
+- Updates peer's root directory CID
+- Removing a directory removes all contents
+
+---
+
 ### Type Definitions
 
 ```typescript
 type ProtocolDataCallback = (peer: string, data: any) => void | Promise<void>;
 type TopicDataCallback = (peer: string, data: any) => void | Promise<void>;
 type PeerChangeCallback = (peer: string, joined: boolean) => void | Promise<void>;
-type AckCallback = () => void | Promise<void>;
+
+interface FileEntries {
+  [pathname: string]: FileEntry | DirectoryEntry;
+}
+
+interface FileEntry {
+  type: 'file';
+  cid: string;
+  mimeType: string;
+}
+
+interface DirectoryEntry {
+  type: 'directory';
+  cid: string;
+}
+
+type FileContent = FileContentFile | FileContentDirectory;
+
+interface FileContentFile {
+  type: 'file';
+  mimeType: string;
+  content: string; // base64-encoded
+}
+
+interface FileContentDirectory {
+  type: 'directory';
+  entries: {
+    [pathname: string]: string; // CID
+  };
+}
 ```
 
 ---
@@ -541,6 +732,111 @@ Or error:
 
 ---
 
+#### listFiles
+
+**Command**: `"listFiles"`
+
+**Args**: `[peerID]`
+- `peerID` (string) - Peer ID to list files from
+
+**Response**: `null`
+
+**Example**:
+```json
+{
+  "requestID": 8,
+  "command": "listFiles",
+  "args": ["12D3KooW..."]
+}
+```
+
+**Notes**:
+- Triggers `peerFiles` server push message with results
+- For remote peers, sends request via reserved `p2p-webapp` protocol
+- Multiple concurrent requests to same peer are deduplicated
+
+---
+
+#### getFile
+
+**Command**: `"getFile"`
+
+**Args**: `[cid]`
+- `cid` (string) - Content identifier to retrieve
+
+**Response**: `null`
+
+**Example**:
+```json
+{
+  "requestID": 9,
+  "command": "getFile",
+  "args": ["QmXg9Pp2ytZ..."]
+}
+```
+
+**Notes**:
+- Triggers `gotFile` server push message with content
+- Can retrieve any content by CID from IPFS network
+
+---
+
+#### storeFile
+
+**Command**: `"storeFile"`
+
+**Args**: `[path, content, directory]`
+- `path` (string) - Unix-style path relative to root
+- `content` (string | null) - Base64-encoded file content, null for directories
+- `directory` (boolean) - true for directory, false for file
+
+**Response**: `null`
+
+**Error**: Error message if validation fails
+
+**Example**:
+```json
+// Create directory
+{
+  "requestID": 10,
+  "command": "storeFile",
+  "args": ["docs", null, true]
+}
+
+// Store file
+{
+  "requestID": 11,
+  "command": "storeFile",
+  "args": ["docs/readme.txt", "SGVsbG8sIHdvcmxkIQ==", false]
+}
+```
+
+**Notes**:
+- Content must be base64-encoded for files (required for binary data)
+- Updates peer's root directory CID
+
+---
+
+#### removeFile
+
+**Command**: `"removeFile"`
+
+**Args**: `[path]`
+- `path` (string) - Unix-style path to remove
+
+**Response**: `null`
+
+**Example**:
+```json
+{
+  "requestID": 12,
+  "command": "removeFile",
+  "args": ["docs/readme.txt"]
+}
+```
+
+---
+
 ### Server Push Messages
 
 #### peerData
@@ -642,6 +938,129 @@ Or error:
 - Only sent if send request included non-negative ack parameter
 - Client library invokes corresponding ack callback
 - Ack numbers managed automatically by client library
+
+---
+
+#### peerFiles
+
+**Command**: `"peerFiles"`
+
+**Args**: `[peerID, rootCID, entries]`
+- `peerID` (string) - Peer whose files are being listed
+- `rootCID` (string) - CID of peer's root directory
+- `entries` (object) - File/directory entries mapping pathnames to entry objects
+
+**Response**: `null` (client acknowledges receipt)
+
+**Entry Format**:
+```json
+{
+  "docs/readme.txt": {
+    "type": "file",
+    "cid": "QmXg9Pp2ytZ...",
+    "mimeType": "text/plain"
+  },
+  "images": {
+    "type": "directory",
+    "cid": "QmYwAPJzv5C..."
+  }
+}
+```
+
+**Example**:
+```json
+{
+  "requestID": 104,
+  "command": "peerFiles",
+  "args": [
+    "12D3KooW...",
+    "QmRootCID...",
+    {
+      "readme.txt": {
+        "type": "file",
+        "cid": "QmFileCID...",
+        "mimeType": "text/plain"
+      }
+    }
+  ]
+}
+```
+
+**Notes**:
+- Sent in response to `listFiles` request
+- Routed to file list callback registered with `listFiles()`
+- Contains complete directory tree structure
+
+---
+
+#### gotFile
+
+**Command**: `"gotFile"`
+
+**Args**: `[cid, result]`
+- `cid` (string) - CID that was requested
+- `result` (object) - Result object with success flag and content
+
+**Response**: `null` (client acknowledges receipt)
+
+**Result Format (success)**:
+```json
+// File
+{
+  "success": true,
+  "content": {
+    "type": "file",
+    "mimeType": "text/plain",
+    "content": "SGVsbG8sIHdvcmxkIQ=="
+  }
+}
+
+// Directory
+{
+  "success": true,
+  "content": {
+    "type": "directory",
+    "entries": {
+      "file.txt": "QmCID1...",
+      "subdir": "QmCID2..."
+    }
+  }
+}
+```
+
+**Result Format (failure)**:
+```json
+{
+  "success": false,
+  "content": {
+    "error": "error message"
+  }
+}
+```
+
+**Example**:
+```json
+{
+  "requestID": 105,
+  "command": "gotFile",
+  "args": [
+    "QmXg9Pp2ytZ...",
+    {
+      "success": true,
+      "content": {
+        "type": "file",
+        "mimeType": "text/plain",
+        "content": "SGVsbG8sIHdvcmxkIQ=="
+      }
+    }
+  ]
+}
+```
+
+**Notes**:
+- Sent in response to `getFile` request
+- Routed to file content callback registered with `getFile()`
+- File content is base64-encoded (required for binary data)
 
 ---
 

@@ -610,12 +610,17 @@ netstat -tuln | grep 10000
 # List running instances
 ./p2p-webapp ps -v
 
-# Kill stuck instance
+# Kill stuck instance (graceful shutdown with SIGTERM, force kill after 5s if needed)
 ./p2p-webapp kill <PID>
 
-# Kill all instances
+# Kill all instances (graceful shutdown with SIGTERM, force kill after 5s if needed)
 ./p2p-webapp killall
 ```
+
+**Note**: The `kill` and `killall` commands use graceful shutdown:
+1. First send SIGTERM for clean shutdown
+2. Wait up to 5 seconds for process to terminate
+3. If still running, force kill with SIGKILL
 
 **Network Inspection**:
 ```bash
