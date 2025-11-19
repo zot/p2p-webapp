@@ -10,12 +10,12 @@
 - aliasCounter: Counter for generating unique aliases
 - verbosity: Logging verbosity level
 - virtualConnections: Map of "peerID:protocol" to libp2p streams
-- peerDirectories: Map of peerID to HAMTDirectory (each peer owns its directory)
+- peerDirectories: Map of peerID to HAMTDirectory (each peer owns its directory, pins it)
 - peerDirectoryCIDs: Map of peerID to current directory CID
-- fileListHandlers: Map of peerID to pending file list request handlers
+- fileListHandlers: Map of peerID to pending getFileList/fileList protocol handlers
 
 ### Does
-- createPeer: Create new libp2p peer with given or fresh peer key, initialize HAMTDirectory
+- createPeer: Create new libp2p peer with given or fresh peer key, accepts optional rootDirectory CID to restore state
 - enableDiscovery: Configure mDNS and DHT discovery
 - enableNATTraversal: Configure Circuit Relay, hole punching, AutoRelay, port mapping
 - startProtocol: Register protocol listener for a peer
@@ -25,12 +25,12 @@
 - publishToTopic: Publish message to GossipSub topic
 - unsubscribeTopic: Unsubscribe peer from topic
 - listTopicPeers: Get list of peers subscribed to topic
-- listFiles: Request file list from peer (local or remote via p2p-webapp protocol)
+- listFiles: Request file list from peer (local or remote via reserved "p2p-webapp" libp2p protocol)
 - getFile: Retrieve IPFS content by CID
-- storeFile: Add file or directory to peer's HAMTDirectory, update CID
-- removeFile: Remove file or directory from peer's HAMTDirectory, update CID
-- handleGetFileList: Handle incoming getFileList request on p2p-webapp protocol
-- handleFileList: Handle incoming fileList response on p2p-webapp protocol
+- storeFile: Create file/directory node in IPFS, update peer's HAMTDirectory at path, update and pin CID
+- removeFile: Remove file or directory from peer's HAMTDirectory at path, update CID
+- handleGetFileList: Handle incoming getFileList() libp2p message on reserved "p2p-webapp" protocol
+- handleFileList: Handle incoming fileList(CID, directory) libp2p message on reserved "p2p-webapp" protocol
 - logVerbose: Log with peer alias prefix at appropriate verbosity level
 - generateAlias: Generate human-readable alias for new peer
 

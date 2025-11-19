@@ -91,7 +91,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Peer ID: %s\n", ipfsNode.PeerID())
 
 		// Create peer manager
-		peerManager, err := peer.NewManager(ctx, ipfsNode.Host(), verbose)
+		peerManager, err := peer.NewManager(ctx, ipfsNode.Host(), ipfsNode.Peer(), verbose)
 		if err != nil {
 			return fmt.Errorf("failed to create peer manager: %w", err)
 		}
@@ -125,7 +125,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Peer ID: %s\n", ipfsNode.PeerID())
 
 		// Create peer manager
-		peerManager, err := peer.NewManager(ctx, ipfsNode.Host(), verbose)
+		peerManager, err := peer.NewManager(ctx, ipfsNode.Host(), ipfsNode.Peer(), verbose)
 		if err != nil {
 			return fmt.Errorf("failed to create peer manager: %w", err)
 		}

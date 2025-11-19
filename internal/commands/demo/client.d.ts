@@ -16,6 +16,7 @@ export declare class P2PWebAppClient {
      * Connect to the WebSocket server and initialize peer identity
      * @param peerKey Optional peer key to restore previous identity
      * @returns Promise resolving to [peerID, peerKey] tuple
+     * CRC: crc-P2PWebAppClient.md
      */
     connect(peerKey?: string): Promise<[string, string]>;
     /**
@@ -56,6 +57,31 @@ export declare class P2PWebAppClient {
      * List peers subscribed to a topic
      */
     listPeers(topic: string): Promise<string[]>;
+    /**
+     * List files stored for this peer
+     * @returns Map of file paths to CIDs
+     */
+    listFiles(): Promise<{
+        [path: string]: string;
+    }>;
+    /**
+     * Get file content by CID
+     * @param cid Content identifier of the file
+     * @returns File content as Uint8Array
+     */
+    getFile(cid: string): Promise<Uint8Array>;
+    /**
+     * Store file content for this peer
+     * @param path File path identifier
+     * @param content File content as Uint8Array
+     * @returns CID of the stored file
+     */
+    storeFile(path: string, content: Uint8Array): Promise<string>;
+    /**
+     * Remove a file from this peer's storage
+     * @param path File path identifier
+     */
+    removeFile(path: string): Promise<void>;
     /**
      * Get the current peer ID
      */

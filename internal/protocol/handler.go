@@ -2,6 +2,7 @@
 package protocol
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -30,6 +31,11 @@ type PeerManager interface {
 	ListPeers(peerID, topic string) ([]string, error)
 	Monitor(peerID, topic string) error
 	StopMonitor(peerID, topic string) error
+	// File operations
+	ListFiles(peerID string) (map[string]string, error)
+	GetFile(cidStr string) ([]byte, error)
+	StoreFile(peerID, path string, content []byte) (string, error)
+	RemoveFile(peerID, path string) error
 }
 
 // NewHandler creates a new protocol handler
@@ -66,6 +72,14 @@ func (h *Handler) HandleClientMessage(msg *Message, peerID string) (*Message, er
 		return h.handleUnsubscribe(msg, peerID)
 	case "listpeers":
 		return h.handleListPeers(msg, peerID)
+	case "listfiles":
+		return h.handleListFiles(msg, peerID)
+	case "getfile":
+		return h.handleGetFile(msg, peerID)
+	case "storefile":
+		return h.handleStoreFile(msg, peerID)
+	case "removefile":
+		return h.handleRemoveFile(msg, peerID)
 	default:
 		return h.errorResponse(msg.RequestID, 400, fmt.Sprintf("unknown method: %s", msg.Method))
 	}
@@ -200,6 +214,82 @@ func (h *Handler) handleListPeers(msg *Message, peerID string) (*Message, error)
 		IsResponse: true,
 		Result:     result,
 	}, nil
+}
+
+func (h *Handler) handleListFiles(msg *Message, peerID string) (*Message, error) {
+	files, err := h.peerManager.ListFiles(peerID)
+	if err != nil {
+		return h.errorResponse(msg.RequestID, 500, err.Error())
+	}
+
+	resp := ListFilesResponse{Files: files}
+	result, _ := json.Marshal(resp)
+	return &Message{
+		RequestID:  msg.RequestID,
+		IsResponse: true,
+		Result:     result,
+	}, nil
+}
+
+func (h *Handler) handleGetFile(msg *Message, peerID string) (*Message, error) {
+	var req GetFileRequest
+	if err := json.Unmarshal(msg.Params, &req); err != nil {
+		return h.errorResponse(msg.RequestID, 400, "invalid params")
+	}
+
+	content, err := h.peerManager.GetFile(req.CID)
+	if err != nil {
+		return h.errorResponse(msg.RequestID, 500, err.Error())
+	}
+
+	// Encode content as base64
+	encoded := base64.StdEncoding.EncodeToString(content)
+	resp := GetFileResponse{Content: encoded}
+	result, _ := json.Marshal(resp)
+	return &Message{
+		RequestID:  msg.RequestID,
+		IsResponse: true,
+		Result:     result,
+	}, nil
+}
+
+func (h *Handler) handleStoreFile(msg *Message, peerID string) (*Message, error) {
+	var req StoreFileRequest
+	if err := json.Unmarshal(msg.Params, &req); err != nil {
+		return h.errorResponse(msg.RequestID, 400, "invalid params")
+	}
+
+	// Decode base64 content
+	content, err := base64.StdEncoding.DecodeString(req.Content)
+	if err != nil {
+		return h.errorResponse(msg.RequestID, 400, "invalid base64 content")
+	}
+
+	cid, err := h.peerManager.StoreFile(peerID, req.Path, content)
+	if err != nil {
+		return h.errorResponse(msg.RequestID, 500, err.Error())
+	}
+
+	resp := StoreFileResponse{CID: cid}
+	result, _ := json.Marshal(resp)
+	return &Message{
+		RequestID:  msg.RequestID,
+		IsResponse: true,
+		Result:     result,
+	}, nil
+}
+
+func (h *Handler) handleRemoveFile(msg *Message, peerID string) (*Message, error) {
+	var req RemoveFileRequest
+	if err := json.Unmarshal(msg.Params, &req); err != nil {
+		return h.errorResponse(msg.RequestID, 400, "invalid params")
+	}
+
+	if err := h.peerManager.RemoveFile(peerID, req.Path); err != nil {
+		return h.errorResponse(msg.RequestID, 500, err.Error())
+	}
+
+	return h.emptyResponse(msg.RequestID)
 }
 
 // Server message senders (to be called by peer manager)

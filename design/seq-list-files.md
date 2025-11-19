@@ -1,17 +1,17 @@
 # Sequence: File List Request
 
-**Source Spec:** main.md - listFiles(peerid)
+**Source Spec:** main.md - listFiles(peerid) (lines 258-281, 343-346)
 
 **Participants:**
 - Client A: P2PWebAppClient instance
 - WebSocketHandler: Routes file list requests to PeerManager
-- PeerManager: Handles both local and remote file list retrieval
+- PeerManager: Handles both local and remote file list retrieval via p2p-webapp protocol
 - Local Peer: The peer associated with Client A
 - Remote Peer: The peer being queried for its file list
 
 **Flow:**
 
-This sequence demonstrates the file list retrieval flow with request deduplication. The client checks if a handler already exists for the target peerID before sending the request. For local peers, the directory is read directly from peerDirectories. For remote peers, the p2p-webapp protocol is used to exchange getFileList and fileList messages. All pending promises for the same peerID are resolved when the response arrives.
+This sequence demonstrates the file list retrieval flow with request deduplication. The client checks if a handler already exists for the target peerID before sending the request. For local peers, the HAMTDirectory is read directly. For remote peers, the reserved "p2p-webapp" libp2p protocol is used to exchange `getFileList()` and `fileList(CID, directory)` messages. The server sends `peerFiles(peerid, CID, entries)` to the client with structured entries containing full pathname tree and metadata. All pending promises for the same peerID are resolved when the response arrives.
 
 ```
                               ┌────────┐                                           ┌────────────────┐             ┌───────────┐                                         ┌──────────┐           ┌───────────┐
@@ -56,11 +56,11 @@ This sequence demonstrates the file list retrieval flow with request deduplicati
           ║         ║              │                                                        │                           │    │ Spawn goroutine                                │                      │                                  ║         ║
           ║         ║              │                                                        │                           │<───┘                                                │                      │                                  ║         ║
           ║         ║              │                                                        │                           │                                                     │                      │                                  ║         ║
-          ║         ║              │                                                        │peerFiles(peerID, entries) │                                                     │                      │                                  ║         ║
-          ║         ║              │                                                        │<──────────────────────────│                                                     │                      │                                  ║         ║
-          ║         ║              │                                                        │                           │                                                     │                      │                                  ║         ║
-          ║         ║              │              peerFiles(peerID, entries)                │                           │                                                     │                      │                                  ║         ║
-          ║         ║              │<───────────────────────────────────────────────────────│                           │                                                     │                      │                                  ║         ║
+          ║         ║              │                                                        │peerFiles(peerID, CID, entries) │                                                     │                      │                                  ║         ║
+          ║         ║              │                                                        │<───────────────────────────────│                                                     │                      │                                  ║         ║
+          ║         ║              │                                                        │                                │                                                     │                      │                                  ║         ║
+          ║         ║              │         peerFiles(peerID, CID, entries)                │                                │                                                     │                      │                                  ║         ║
+          ║         ║              │<───────────────────────────────────────────────────────│                                │                                                     │                      │                                  ║         ║
           ║         ╠══════════════╪════════════════════════════════════════════════════════╪═══════════════════════════╪═════════════════════════════════════════════════════╪══════════════════════╪══════════════════════════════════╣         ║
           ║         ║ [peerID is remote peer]                                               │                           │                                                     │                      │                                  ║         ║
           ║         ║              │                                                        │                           │                     send("p2p-webapp", getFileList())                      │                                  ║         ║
@@ -74,18 +74,18 @@ This sequence demonstrates the file list retrieval flow with request deduplicati
           ║         ║              │                                                        │                           │                                                     │                      │    │ Get local HAMTDirectory     ║         ║
           ║         ║              │                                                        │                           │                                                     │                      │<───┘                             ║         ║
           ║         ║              │                                                        │                           │                                                     │                      │                                  ║         ║
-          ║         ║              │                                                        │                           │                   send("p2p-webapp", fileList(entries))                    │                                  ║         ║
+          ║         ║              │                                                        │                           │                send("p2p-webapp", fileList(CID, directory))                │                                  ║         ║
           ║         ║              │                                                        │                           │<───────────────────────────────────────────────────────────────────────────│                                  ║         ║
           ║         ║              │                                                        │                           │                                                     │                      │                                  ║         ║
           ║         ║              │                                                        │                           │────┐                                                │                      │                                  ║         ║
-          ║         ║              │                                                        │                           │    │ handleFileList(entries)                        │                      │                                  ║         ║
+          ║         ║              │                                                        │                           │    │ handleFileList(CID, directory)                 │                      │                                  ║         ║
           ║         ║              │                                                        │                           │<───┘                                                │                      │                                  ║         ║
           ║         ║              │                                                        │                           │                                                     │                      │                                  ║         ║
-          ║         ║              │                                                        │peerFiles(peerID, entries) │                                                     │                      │                                  ║         ║
-          ║         ║              │                                                        │<──────────────────────────│                                                     │                      │                                  ║         ║
-          ║         ║              │                                                        │                           │                                                     │                      │                                  ║         ║
-          ║         ║              │              peerFiles(peerID, entries)                │                           │                                                     │                      │                                  ║         ║
-          ║         ║              │<───────────────────────────────────────────────────────│                           │                                                     │                      │                                  ║         ║
+          ║         ║              │                                                        │peerFiles(peerID, CID, entries) │                                                     │                      │                                  ║         ║
+          ║         ║              │                                                        │<───────────────────────────────│                                                     │                      │                                  ║         ║
+          ║         ║              │                                                        │                                │                                                     │                      │                                  ║         ║
+          ║         ║              │         peerFiles(peerID, CID, entries)                │                                │                                                     │                      │                                  ║         ║
+          ║         ║              │<───────────────────────────────────────────────────────│                                │                                                     │                      │                                  ║         ║
           ║         ╚══════════════╪════════════════════════════════════════════════════════╪═══════════════════════════╪═════════════════════════════════════════════════════╪══════════════════════╪══════════════════════════════════╝         ║
           ║                        │                                                        │                           │                                                     │                      │                                            ║
           ║                        │────┐                                                   │                           │                                                     │                      │                                            ║
@@ -122,9 +122,16 @@ This sequence demonstrates the file list retrieval flow with request deduplicati
 
 3. **Local Path**: Direct HAMTDirectory access from peerDirectories map, response sent via goroutine to avoid blocking.
 
-4. **Remote Path**: Uses the reserved "p2p-webapp" protocol to exchange getFileList() and fileList() messages between peers.
+4. **Remote Path**: Uses the reserved "p2p-webapp" libp2p protocol to exchange `getFileList()` and `fileList(CID, directory)` messages between peers.
 
 5. **Promise Resolution**: When peerFiles arrives, all pending promises for that peerID are resolved simultaneously, then the handlers are removed.
+
+6. **Entry Structure**: The `peerFiles(peerid, CID, entries)` server message contains:
+   - `CID`: The peer's current directory root CID
+   - `entries`: JSON object with full pathname tree structure: `{PATHNAME: entry}`
+   - File entries: `{type: "file", cid: CID, mimeType: MIMETYPE}`
+   - Directory entries: `{type: "directory", cid: CID}`
+   - Example pathnames: "docs/readme.txt", "images", "images/photo.jpg"
 
 **Related:**
 - crc-P2PWebAppClient.md: Client-side file list handling

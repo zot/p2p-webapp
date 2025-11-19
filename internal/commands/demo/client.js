@@ -1,3 +1,4 @@
+// CRC: crc-P2PWebAppClient.md
 export class P2PWebAppClient {
     constructor() {
         this.ws = null;
@@ -19,6 +20,7 @@ export class P2PWebAppClient {
      * Connect to the WebSocket server and initialize peer identity
      * @param peerKey Optional peer key to restore previous identity
      * @returns Promise resolving to [peerID, peerKey] tuple
+     * CRC: crc-P2PWebAppClient.md
      */
     async connect(peerKey) {
         const wsUrl = this.getDefaultWSUrl();
@@ -118,6 +120,55 @@ export class P2PWebAppClient {
         const result = await this.sendRequest('listpeers', { topic });
         const response = result;
         return response.peers || [];
+    }
+    /**
+     * List files stored for this peer
+     * @returns Map of file paths to CIDs
+     */
+    async listFiles() {
+        const result = await this.sendRequest('listfiles', {});
+        const response = result;
+        return response.files || {};
+    }
+    /**
+     * Get file content by CID
+     * @param cid Content identifier of the file
+     * @returns File content as Uint8Array
+     */
+    async getFile(cid) {
+        const result = await this.sendRequest('getfile', { cid });
+        const response = result;
+        // Decode base64 to Uint8Array
+        const binaryString = atob(response.content);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes;
+    }
+    /**
+     * Store file content for this peer
+     * @param path File path identifier
+     * @param content File content as Uint8Array
+     * @returns CID of the stored file
+     */
+    async storeFile(path, content) {
+        // Encode Uint8Array to base64
+        let binaryString = '';
+        for (let i = 0; i < content.length; i++) {
+            binaryString += String.fromCharCode(content[i]);
+        }
+        const base64Content = btoa(binaryString);
+        const result = await this.sendRequest('storefile', { path, content: base64Content });
+        const response = result;
+        return response.cid;
+    }
+    /**
+     * Remove a file from this peer's storage
+     * @param path File path identifier
+     */
+    async removeFile(path) {
+        await this.sendRequest('removefile', { path });
     }
     /**
      * Get the current peer ID

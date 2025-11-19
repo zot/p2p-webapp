@@ -48,6 +48,27 @@ export interface ListPeersRequest {
 export interface ListPeersResponse {
     peers: string[];
 }
+export interface ListFilesResponse {
+    files: {
+        [path: string]: string;
+    };
+}
+export interface GetFileRequest {
+    cid: string;
+}
+export interface GetFileResponse {
+    content: string;
+}
+export interface StoreFileRequest {
+    path: string;
+    content: string;
+}
+export interface StoreFileResponse {
+    cid: string;
+}
+export interface RemoveFileRequest {
+    path: string;
+}
 export interface PeerDataRequest {
     peer: string;
     protocol: string;

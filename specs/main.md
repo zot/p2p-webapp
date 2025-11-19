@@ -196,6 +196,8 @@ The tracking system ensures:
 Each peer has a [HAMTDirectory](https://pkg.go.dev/github.com/ipfs/boxo@v0.35.2/ipld/unixfs/io#HAMTDirectory), populated at creation time by the `Peer()` message. After that, the `storeFile()` message can add or remove entries.
 The peer also keeps the CID of its directory which it updates after any change.
 
+**IMPORTANT**: each peer pins its directory.
+
 ## Peer Lifecycle
 Peers and their WebSocket connections are ephemeral. The client provides peerKey and rootDirectory CID to restore a peer's identity and directory state across sessions. The storeFile() and removeFile() operations implicitly operate on the peer associated with the WebSocket connection sending the request.
 

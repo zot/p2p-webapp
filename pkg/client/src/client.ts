@@ -4,6 +4,9 @@ import {
   StringResponse,
   PeerResponse,
   ListPeersResponse,
+  ListFilesResponse,
+  GetFileResponse,
+  StoreFileResponse,
   ProtocolDataCallback,
   TopicDataCallback,
   PeerChangeCallback,
@@ -155,6 +158,61 @@ export class P2PWebAppClient {
     const result = await this.sendRequest('listpeers', { topic });
     const response = result as ListPeersResponse;
     return response.peers || [];
+  }
+
+  /**
+   * List files stored for this peer
+   * @returns Map of file paths to CIDs
+   */
+  async listFiles(): Promise<{ [path: string]: string }> {
+    const result = await this.sendRequest('listfiles', {});
+    const response = result as ListFilesResponse;
+    return response.files || {};
+  }
+
+  /**
+   * Get file content by CID
+   * @param cid Content identifier of the file
+   * @returns File content as Uint8Array
+   */
+  async getFile(cid: string): Promise<Uint8Array> {
+    const result = await this.sendRequest('getfile', { cid });
+    const response = result as GetFileResponse;
+
+    // Decode base64 to Uint8Array
+    const binaryString = atob(response.content);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  /**
+   * Store file content for this peer
+   * @param path File path identifier
+   * @param content File content as Uint8Array
+   * @returns CID of the stored file
+   */
+  async storeFile(path: string, content: Uint8Array): Promise<string> {
+    // Encode Uint8Array to base64
+    let binaryString = '';
+    for (let i = 0; i < content.length; i++) {
+      binaryString += String.fromCharCode(content[i]);
+    }
+    const base64Content = btoa(binaryString);
+
+    const result = await this.sendRequest('storefile', { path, content: base64Content });
+    const response = result as StoreFileResponse;
+    return response.cid;
+  }
+
+  /**
+   * Remove a file from this peer's storage
+   * @param path File path identifier
+   */
+  async removeFile(path: string): Promise<void> {
+    await this.sendRequest('removefile', { path });
   }
 
   /**

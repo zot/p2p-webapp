@@ -112,3 +112,36 @@ type PeerChangeRequest struct {
 type AckRequest struct {
 	Ack int `json:"ack"`
 }
+
+// File Operation Messages
+
+// ListFilesResponse returns map of file paths to CIDs
+type ListFilesResponse struct {
+	Files map[string]string `json:"files"`
+}
+
+// GetFileRequest requests file content by CID
+type GetFileRequest struct {
+	CID string `json:"cid"`
+}
+
+// GetFileResponse returns file content (base64 encoded)
+type GetFileResponse struct {
+	Content string `json:"content"` // base64 encoded
+}
+
+// StoreFileRequest stores file content
+type StoreFileRequest struct {
+	Path    string `json:"path"`
+	Content string `json:"content"` // base64 encoded
+}
+
+// StoreFileResponse returns the CID of stored file
+type StoreFileResponse struct {
+	CID string `json:"cid"`
+}
+
+// RemoveFileRequest removes a file
+type RemoveFileRequest struct {
+	Path string `json:"path"`
+}

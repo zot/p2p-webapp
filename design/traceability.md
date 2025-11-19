@@ -2,11 +2,11 @@
 
 ## Implementation Status Summary
 
-**Last Updated:** After adding traceability comments to implementation
+**Last Updated:** After implementing IPFS file operations (listFiles, getFile, storeFile, removeFile)
 
 **Overall Status:**
 - ✅ Core functionality implemented (server, WebSocket, peer management, bundle management, process tracking, client library, commands)
-- ⚠️ File operations planned but not yet implemented (IPFS file management system)
+- ✅ **File operations implemented** (IPFS file management system with listFiles, getFile, storeFile, removeFile)
 - ✅ **Traceability comments added** to all major components (file headers and key methods)
 
 **File Structure Notes:**
@@ -94,6 +94,23 @@
   - [ ] handleSend() comment
   - [ ] handleListPeers() comment
 
+- **internal/protocol/messages.go** ✅ EXISTS (message type definitions)
+  - [x] File operation message types added:
+    - ListFilesResponse
+    - GetFileRequest, GetFileResponse
+    - StoreFileRequest, StoreFileResponse
+    - RemoveFileRequest
+
+- **internal/protocol/handler.go** ✅ EXISTS (file operation handlers)
+  - ✅ handleListFiles() implemented
+  - ✅ handleGetFile() implemented
+  - ✅ handleStoreFile() implemented
+  - ✅ handleRemoveFile() implemented
+  - [ ] handleListFiles() comment → seq-list-files.md
+  - [ ] handleGetFile() comment
+  - [ ] handleStoreFile() comment → seq-store-file.md
+  - [ ] handleRemoveFile() comment
+
 **Tests:**
 - **internal/server/websocket_test.go** ❌ DOES NOT EXIST
   - [ ] File header referencing CRC card
@@ -126,13 +143,15 @@
   - [ ] Bootstrap() comment
   - [ ] allowPrivateGater type comment
 
-**Planned but not yet implemented:**
-  - ❌ listFiles() → seq-list-files.md
-  - ❌ getFile()
-  - ❌ storeFile() → seq-store-file.md
-  - ❌ removeFile()
-  - ❌ handleGetFileList() → seq-list-files.md
-  - ❌ handleFileList() → seq-list-files.md
+**File operations implemented:**
+  - ✅ ListFiles() → seq-list-files.md
+  - ✅ GetFile()
+  - ✅ StoreFile() → seq-store-file.md
+  - ✅ RemoveFile()
+  - [ ] ListFiles() comment → seq-list-files.md
+  - [ ] GetFile() comment
+  - [ ] StoreFile() comment → seq-store-file.md
+  - [ ] RemoveFile() comment
 
 **Tests:**
 - **internal/peer/manager_test.go** ❌ DOES NOT EXIST
@@ -247,14 +266,21 @@
 
 - **pkg/client/src/types.ts** ✅ EXISTS (type definitions)
   - [ ] File header
+  - [x] File operation types added:
+    - ListFilesResponse
+    - GetFileRequest, GetFileResponse
+    - StoreFileRequest, StoreFileResponse
+    - RemoveFileRequest
 
-**Planned but not yet implemented:**
-  - ❌ listFiles() → seq-list-files.md
-  - ❌ getFile()
-  - ❌ storeFile() → seq-store-file.md
-  - ❌ removeFile()
-  - ❌ routePeerFiles() → seq-list-files.md
-  - ❌ routeGotFile()
+**File operations implemented:**
+  - ✅ listFiles() → seq-list-files.md
+  - ✅ getFile()
+  - ✅ storeFile() → seq-store-file.md
+  - ✅ removeFile()
+  - [ ] listFiles() comment → seq-list-files.md
+  - [ ] getFile() comment
+  - [ ] storeFile() comment → seq-store-file.md
+  - [ ] removeFile() comment
 
 **Tests:**
 - **pkg/client/src/client.test.ts** ❌ DOES NOT EXIST

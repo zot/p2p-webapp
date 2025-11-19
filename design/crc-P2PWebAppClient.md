@@ -26,9 +26,9 @@
 - publish: Publish message to topic
 - unsubscribe: Unsubscribe from topic
 - listPeers: Get peers subscribed to topic
-- listFiles: Request file list from peer (manages deduplication for same peerID)
-- getFile: Request IPFS content by CID
-- storeFile: Store file or directory in this peer's directory (implicit peerID)
+- listFiles: Request file list from peer (returns promise, manages deduplication and handler pattern for async peerFiles server message)
+- getFile: Request IPFS content by CID (triggers gotFile server message with {success, content})
+- storeFile: Store file or directory with signature storeFile(path, content, directory) where content is null for directories
 - removeFile: Remove file or directory from this peer's directory (implicit peerID)
 - sendRequest: Send JSON-RPC request and return Promise
 - handleResponse: Process response messages (resolve pending Promises)
@@ -36,7 +36,7 @@
 - routePeerData: Route peerData to protocol listener
 - routeTopicData: Route topicData to topic listener
 - routePeerChange: Route peerChange to topic listener
-- routePeerFiles: Route peerFiles to pending listFiles handlers
+- routePeerFiles: Route peerFiles(peerid, CID, entries) to pending listFiles handlers for that peerID
 - routeGotFile: Route gotFile to pending getFile handlers
 - routeAck: Invoke ack callback and remove from map
 

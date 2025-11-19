@@ -65,6 +65,33 @@ export interface ListPeersResponse {
   peers: string[];
 }
 
+// File operation types
+
+export interface ListFilesResponse {
+  files: { [path: string]: string }; // path -> CID
+}
+
+export interface GetFileRequest {
+  cid: string;
+}
+
+export interface GetFileResponse {
+  content: string; // base64 encoded
+}
+
+export interface StoreFileRequest {
+  path: string;
+  content: string; // base64 encoded
+}
+
+export interface StoreFileResponse {
+  cid: string;
+}
+
+export interface RemoveFileRequest {
+  path: string;
+}
+
 // Server request message types
 
 export interface PeerDataRequest {
