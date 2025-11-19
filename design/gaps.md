@@ -82,31 +82,38 @@ All requirements from main.md are covered by the design:
 - Specify log levels consistently
 - Document what each verbosity level logs
 
-### B6: IPFS File Sharing Not Implemented
+### B6: IPFS File Sharing - RESOLVED (Designed)
 
 **Issue**: ipfs-lite imported and `ipfs/` directory structure exists, but no file sharing functionality
 
 **Impact**: Medium - library over-specified for actual usage, confusing to users
 
-**Current State**:
-- ipfs-lite only used for DHT operations and relay discovery
-- `ipfs/` directory in bundle format but no API to add/get/pin files
-- No CID-based content addressing in WebSocket protocol
-- Missing commands: `addFile()`, `getFile()`, `pinFile()`, `listFiles()`
+**Resolution**: Option A selected - Full IPFS file sharing API designed
 
-**Recommendation**:
-- **Option A**: Implement full IPFS file sharing API
-  - Add WebSocket commands for file operations
-  - Implement CID-based content retrieval
-  - Add pinning and unpinning operations
-  - Provide progress callbacks for large files
-- **Option B**: Remove ipfs-lite dependency
-  - Replace with direct libp2p Kademlia DHT usage
-  - Remove `ipfs/` directory from bundle format
-  - Simplify dependencies and reduce confusion
-  - Keep only the DHT functionality actually being used
+**Design Status**: Level 2 design completed
+- ✓ Specs updated with file operations (specs/main.md)
+- ✓ CRC cards updated (crc-PeerManager.md, crc-WebSocketHandler.md, crc-P2PWebAppClient.md)
+- ✓ Sequence diagrams created (seq-list-files.md, seq-store-file.md)
+- ✓ Architecture updated (architecture.md - IPFS File Management System)
+- ✓ Traceability updated (traceability.md)
 
-**Decision Required**: Is file sharing a planned feature or unnecessary complexity?
+**Design Highlights**:
+- Per-peer HAMTDirectory for file storage
+- Ownership enforcement (storeFile/removeFile implicit peerID)
+- Cross-peer file list queries (listFiles with explicit peerID)
+- Reserved "p2p-webapp" protocol for peer-to-peer file list exchange
+- CID-based content retrieval (getFile)
+- Client persists peerKey + rootDirectory CID for restoration
+
+**Implementation Status**: Pending (Level 3 not yet implemented)
+
+**Next Steps**:
+1. Implement PeerManager file operations (listFiles, getFile, storeFile, removeFile)
+2. Add HAMTDirectory initialization in createPeer
+3. Implement WebSocketHandler ownership enforcement
+4. Add client library file methods
+5. Implement "p2p-webapp" protocol handlers
+6. Add unit tests for file operations
 
 ---
 
@@ -241,4 +248,4 @@ All requirements from main.md are covered by the design:
 
 ---
 
-*Last updated: Added B6 - IPFS file sharing gap identified*
+*Last updated: B6 IPFS file sharing gap resolved - Level 2 design completed*

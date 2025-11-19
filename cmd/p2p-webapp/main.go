@@ -1,3 +1,4 @@
+// CRC: crc-CommandRouter.md, Spec: main.md
 package main
 
 import (
@@ -24,6 +25,7 @@ var (
 	dir     string
 )
 
+// CRC: crc-CommandRouter.md
 var rootCmd = &cobra.Command{
 	Use:   "p2p-webapp",
 	Short: "A Go application to host peer-to-peer applications",

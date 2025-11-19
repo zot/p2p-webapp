@@ -1,3 +1,4 @@
+// CRC: crc-BundleManager.md, Spec: main.md
 package bundle
 
 import (
@@ -18,7 +19,8 @@ const (
 )
 
 // Footer contains metadata about the bundled ZIP
-type Footer struct {
+// CRC: crc-BundleManager.md
+type Footer struct{
 	Magic  [8]byte // "IPFSWAPP"
 	Offset int64   // Offset to start of ZIP data
 	Size   int64   // Size of ZIP data
@@ -28,6 +30,7 @@ type Footer struct {
 // sourceBinary: path to the p2p-webapp binary (can be bundled or unbundled)
 // siteDir: directory containing html/, ipfs/, storage/
 // outputPath: path for the bundled binary
+// CRC: crc-BundleManager.md
 func CreateBundle(sourceBinary, siteDir, outputPath string) error {
 	// Get the size of the executable portion (excluding any existing bundle)
 	binarySize, err := GetBinarySize(sourceBinary)
@@ -187,6 +190,7 @@ func GetBinarySize(binaryPath string) (int64, error) {
 }
 
 // IsBundled checks if the current binary has bundled content
+// CRC: crc-BundleManager.md
 func IsBundled() (bool, error) {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -230,6 +234,7 @@ func IsBundled() (bool, error) {
 }
 
 // ExtractBundle extracts bundled content to a directory
+// CRC: crc-BundleManager.md
 func ExtractBundle(targetDir string) error {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -326,6 +331,7 @@ func extractZipFile(f *zip.File, targetDir string) error {
 
 // GetBundleReader returns a zip.Reader for the bundled content
 // Returns nil if the binary is not bundled
+// CRC: crc-BundleManager.md
 func GetBundleReader() (*zip.Reader, error) {
 	exePath, err := os.Executable()
 	if err != nil {

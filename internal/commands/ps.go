@@ -1,3 +1,4 @@
+// CRC: crc-CommandRouter.md, Spec: main.md
 package commands
 
 import (
@@ -10,6 +11,7 @@ import (
 var psVerbose bool
 
 // PsCmd represents the ps command
+// CRC: crc-CommandRouter.md
 var PsCmd = &cobra.Command{
 	Use:   "ps",
 	Short: "List running p2p-webapp instances",

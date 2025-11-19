@@ -1,3 +1,4 @@
+// CRC: crc-Server.md, crc-WebServer.md, Spec: main.md
 package server
 
 import (
@@ -23,6 +24,7 @@ import (
 )
 
 // Server manages the HTTP server and WebSocket connections
+// CRC: crc-Server.md
 type Server struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -40,11 +42,13 @@ type Server struct {
 }
 
 // zipFileSystem implements http.FileSystem for serving files from a ZIP archive
+// CRC: crc-WebServer.md
 type zipFileSystem struct {
 	reader *zip.Reader
 }
 
 // Open implements http.FileSystem interface
+// CRC: crc-WebServer.md
 func (zfs *zipFileSystem) Open(name string) (http.File, error) {
 	// Clean the path and remove leading slash
 	// Use path.Clean (not filepath.Clean) to ensure forward slashes on all platforms
@@ -86,6 +90,7 @@ func (zfs *zipFileSystem) Open(name string) (http.File, error) {
 }
 
 // zipFile implements http.File interface
+// CRC: crc-WebServer.md
 type zipFile struct {
 	name    string
 	content []byte
@@ -93,6 +98,8 @@ type zipFile struct {
 	info    os.FileInfo
 }
 
+// Read implements http.File interface
+// CRC: crc-WebServer.md
 func (zf *zipFile) Read(p []byte) (int, error) {
 	return zf.reader.Read(p)
 }
@@ -114,6 +121,8 @@ func (zf *zipFile) Stat() (os.FileInfo, error) {
 }
 
 // NewServerFromDir creates a new HTTP server serving from a filesystem directory
+// CRC: crc-Server.md
+// Sequence: seq-server-startup.md
 func NewServerFromDir(ctx context.Context, pm *peer.Manager, htmlDir string, port int, linger bool) *Server {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Server{
@@ -144,6 +153,8 @@ func NewServerFromDir(ctx context.Context, pm *peer.Manager, htmlDir string, por
 }
 
 // NewServerFromBundle creates a new HTTP server serving from a bundled ZIP archive
+// CRC: crc-Server.md
+// Sequence: seq-server-startup.md
 func NewServerFromBundle(ctx context.Context, pm *peer.Manager, bundleReader *zip.Reader, port int, linger bool) *Server {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Server{
@@ -174,6 +185,8 @@ func NewServerFromBundle(ctx context.Context, pm *peer.Manager, bundleReader *zi
 }
 
 // Start starts the HTTP server
+// CRC: crc-Server.md
+// Sequence: seq-server-startup.md
 func (s *Server) Start() error {
 	// Determine starting port
 	startPort := s.port
@@ -231,6 +244,7 @@ func (s *Server) Start() error {
 }
 
 // Stop stops the HTTP server
+// CRC: crc-Server.md
 func (s *Server) Stop() error {
 	// Cancel exit timer if running
 	s.cancelExitTimer()
@@ -340,6 +354,7 @@ func (s *Server) OpenBrowser() error {
 // spaHandler wraps http.FileServer to provide SPA routing fallback
 // For SPA routes (no file extension, file doesn't exist), serve index.html
 // while preserving the URL path for client-side routing
+// CRC: crc-WebServer.md
 func (s *Server) spaHandler(fs http.FileSystem) http.Handler {
 	fileServer := http.FileServer(fs)
 

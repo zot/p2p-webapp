@@ -1,3 +1,4 @@
+// CRC: crc-CommandRouter.md, Spec: main.md
 package commands
 
 import (
@@ -9,6 +10,7 @@ import (
 )
 
 // ExtractCmd represents the extract command
+// CRC: crc-CommandRouter.md
 var ExtractCmd = &cobra.Command{
 	Use:   "extract",
 	Short: "Extract the bundled site to the current directory",

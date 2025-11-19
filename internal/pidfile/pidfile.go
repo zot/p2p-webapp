@@ -1,3 +1,4 @@
+// CRC: crc-ProcessTracker.md, Spec: main.md
 package pidfile
 
 import (
@@ -14,6 +15,7 @@ import (
 const pidFilePath = "/tmp/.p2p-webapp"
 
 // PIDFile represents the JSON structure of the PID tracking file
+// CRC: crc-ProcessTracker.md
 type PIDFile struct {
 	PIDs []int32 `json:"pids"`
 }
@@ -124,6 +126,8 @@ func verifyPIDs(file *os.File, pids []int32) ([]int32, error) {
 }
 
 // Register adds the current process PID to the tracking file
+// CRC: crc-ProcessTracker.md
+// Sequence: seq-server-startup.md
 func Register() error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -162,6 +166,7 @@ func Unregister() error {
 }
 
 // List returns all verified running p2p-webapp PIDs
+// CRC: crc-ProcessTracker.md
 func List() ([]int32, error) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -176,6 +181,7 @@ func List() ([]int32, error) {
 }
 
 // Kill terminates a specific PID if it's a valid p2p-webapp process
+// CRC: crc-ProcessTracker.md
 func Kill(pid int32) error {
 	mu.Lock()
 	defer mu.Unlock()

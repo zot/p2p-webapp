@@ -1,3 +1,4 @@
+// CRC: crc-WebSocketHandler.md, Spec: main.md
 package server
 
 import (
@@ -18,6 +19,7 @@ var upgrader = websocket.Upgrader{
 }
 
 // WSConnection represents a WebSocket connection
+// CRC: crc-WebSocketHandler.md
 type WSConnection struct {
 	conn          *websocket.Conn
 	peerID        string
@@ -33,6 +35,8 @@ type WSConnection struct {
 }
 
 // NewWSConnection creates a new WebSocket connection handler
+// CRC: crc-WebSocketHandler.md
+// Sequence: seq-peer-creation.md
 func NewWSConnection(conn *websocket.Conn, handler *protocol.Handler, pm protocol.PeerManager, manager *peer.Manager, server *Server) *WSConnection {
 	return &WSConnection{
 		conn:        conn,
@@ -46,6 +50,7 @@ func NewWSConnection(conn *websocket.Conn, handler *protocol.Handler, pm protoco
 }
 
 // Start begins processing the WebSocket connection
+// CRC: crc-WebSocketHandler.md
 func (ws *WSConnection) Start() {
 	go ws.readPump()
 	go ws.writePump()

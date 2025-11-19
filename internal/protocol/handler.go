@@ -1,3 +1,4 @@
+// CRC: crc-WebSocketHandler.md, Spec: main.md
 package protocol
 
 import (
@@ -7,6 +8,7 @@ import (
 )
 
 // Handler routes and processes protocol messages
+// CRC: crc-WebSocketHandler.md
 type Handler struct {
 	peerManager PeerManager
 	nextReqID   int
@@ -31,6 +33,7 @@ type PeerManager interface {
 }
 
 // NewHandler creates a new protocol handler
+// CRC: crc-WebSocketHandler.md
 func NewHandler(pm PeerManager) *Handler {
 	return &Handler{
 		peerManager: pm,
@@ -44,6 +47,7 @@ func (h *Handler) SetAckCallback(callback func(peerID string, ack int)) {
 }
 
 // HandleClientMessage processes messages from the client
+// CRC: crc-WebSocketHandler.md
 func (h *Handler) HandleClientMessage(msg *Message, peerID string) (*Message, error) {
 	switch msg.Method {
 	case "peer":

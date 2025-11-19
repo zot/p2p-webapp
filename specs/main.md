@@ -192,9 +192,16 @@ The tracking system ensures:
   - Each message corresponds to a JSON-encodable Go struct in the server and a TypeScript struct in the browser
   - JSON properties are lowercase
 
+# Peer directories
+Each peer has a [HAMTDirectory](https://pkg.go.dev/github.com/ipfs/boxo@v0.35.2/ipld/unixfs/io#HAMTDirectory), populated at creation time by the `Peer()` message. After that, the `storeFile()` message can add or remove entries.
+The peer also keeps the CID of its directory which it updates after any change.
+
+## Peer Lifecycle
+Peers and their WebSocket connections are ephemeral. The client provides peerKey and rootDirectory CID to restore a peer's identity and directory state across sessions. The storeFile() and removeFile() operations implicitly operate on the peer associated with the WebSocket connection sending the request.
+
 # Client Request messages
 
-## Peer(peerkey?)
+## Peer(peerkey?, rootDirectory?: CID)
 - Create a new peer for this websocket connection with peerkey. If none given, use a fresh peerkey.
 - Must be the first command from the browser for a websocket connection
 - Cannot be sent more than once
@@ -202,6 +209,9 @@ The tracking system ensures:
 - If a peer with the resulting peer ID is already registered (e.g., duplicate browser tab with same peer key), returns an error
   - This prevents multiple WebSocket connections from using the same peer identity
   - Common cause: user opens the same app in multiple browser tabs with the same stored peer key
+- rootDirectory is an optional string representation of the peer directory's CID
+  - if present, initialize the peer's directory
+  - if absent, the peer's directory remains nil
 ### Response: [peerid, peerkey] or error
 
 ## start(protocol)
@@ -243,6 +253,74 @@ The tracking system ensures:
 - Get list of peers subscribed to a topic
 ### Response: array of peer IDs or error
 
+## listFiles(peerid: any)
+### Client TS code
+1. Create a promise and add the resolve/reject pair to the listFiles handler for peerid (create if needed), this will be called later on when the client receives the `peerFiles` server message
+2. If the handler list was just created, send this client message to Go, otherwise do not send because one is already pending
+3. Return the promise
+
+### Go code
+Requests a list of files for a peer. The response will go to the client as a `peerFiles` server message (see response).
+
+Libp2p messaging in this section uses a reserved libp2p peer messaging protocol named `p2p-webapp`.
+
+If peerid is the local peer, returns null and spawn a goroutine to send the `peerFiles` server message
+Otherwise ask the requested peer for its files
+1. If there is already a fileList handler for that peer return null because there is already a pending message
+2. Otherwise register a fileList handler for the peer
+3. Send `getFileList()` libp2p message to the requested peer using the reserved `p2p-webapp` protocol
+   - if there is an error
+     - remove the handler
+     - return the error
+   - otherwise spawn a goroutine for the rest of this operation and return null
+4. When the requested peer receives a `getFileList` libp2p message on the reserved protocol, it will send a `fileList(CID, directory)` libp2p message back to this peer, also in the reserved protocol.
+5. Upon receiving a `fileList` libp2p message on the reserved protocol (see step 4), send the `peerFiles` server message to the client (see response)
+### Response: null or error (will also send a server `peerFiles` message)
+Also generates a server message `peerFiles(peerid, CID, entries)` where entries contains JSON object with an entry for each item in the peer's entire HAMTDirectory tree: `{PATHNAME: entry}`. PATHNAME is the unix-style relative path for a tree entry, starting at the top of the tree.
+
+Entries:
+  - `{type: "directory", cid: CID}`
+  - `{type: "file", cid: CID, mimeType: MIMETYPE}`
+
+Example entries object:
+```json
+{
+  "docs/readme.txt": {
+    "type": "file",
+    "cid": "QmXg9Pp2ytZ14xgmQjYEiHjVjMFXzCVVEcRTWJBmLgR39V",
+    "mimeType": "text/plain"
+  },
+  "images": {
+    "type": "directory",
+    "cid": "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+  },
+  "images/photo.jpg": {
+    "type": "file",
+    "cid": "QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB",
+    "mimeType": "image/jpeg"
+  }
+}
+```
+
+## getFile(cid: string)
+- Get IPFS content by CID
+- Will send a server message `gotFile(cid, {success: bool, content})` to the client when it is retrieved
+  - if there was an error, `success` will be `false` and `content` will contain an error object
+  - if successful, content will be JSON for a directory or a file:
+    - `{type: "file", mimeType: string, content: string}`
+    - `{type: "directory", entries: {PATHNAME: CID, ...}}`
+### Response: null or error
+
+## storeFile(path: string, content: string | null, directory: bool)
+Make a file or directory node (as indicated) and store it in ipfs-lite, which will return the new node. Content will be null for a directory, if directory is false, it is an error for content to be null.
+Use path to find the correct subdirectory in the peer's directory and add the new node there.
+Update the peer's CID after the change.
+### Response: null or error
+
+## removeFile(path: string)
+Use path to find the correct directory and remove the element from it.
+### Response: null or error
+
 # Server Request messages
 
 ## peerData(peer, protocol, data: any)
@@ -260,8 +338,14 @@ The tracking system ensures:
 - Automatically sent for all subscribed topics (no separate monitoring needed)
 ### Response: null or error
 
-## ack(ack: number)
+## peerFiles(peerid, CID, fileObj)
+- Notifies the client of the current files in the given peer. This is sent to the client whenever the peer receives a `peerFiles` libp2p message on the reserved `p2p-webapp` protocol.
+- See the listFiles response section for the format of fileObj
+### Response: null or error
+
+## ack(ack: number, optionalData: any)
 - Notifies client that a message with the given ack number was successfully delivered to the peer
+  - optionalData is the data the peer responded with -- not present unless the client message specifies it
 - Only sent in response to `send` requests with a non-negative `ack` parameter (>= 0)
 - If a `send` request has `ack` = -1 or no ack parameter, no `ack` message is sent back
 - Client library manages ack numbers internally and notifies consumers via callback

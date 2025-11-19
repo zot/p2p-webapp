@@ -1,3 +1,4 @@
+// CRC: crc-PeerManager.md, Spec: main.md
 package peer
 
 import (
@@ -26,6 +27,7 @@ import (
 )
 
 // Manager manages multiple peers
+// CRC: crc-PeerManager.md
 type Manager struct {
 	ctx            context.Context
 	mu             sync.RWMutex
@@ -39,6 +41,7 @@ type Manager struct {
 }
 
 // Peer represents a single libp2p peer with its own host and state
+// CRC: crc-PeerManager.md
 type Peer struct {
 	ctx              context.Context
 	host             host.Host
@@ -98,6 +101,8 @@ func (n *discoveryNotifee) HandlePeerFound(pi peer.AddrInfo) {
 }
 
 // NewManager creates a new peer manager
+// CRC: crc-PeerManager.md
+// Sequence: seq-server-startup.md
 func NewManager(ctx context.Context, bootstrapHost host.Host, verbosity int) (*Manager, error) {
 	return &Manager{
 		ctx:         ctx,
@@ -216,6 +221,8 @@ func (m *Manager) prepareCreatePeer(requestedPeerKey string) (priv crypto.PrivKe
 }
 
 // CreatePeer creates a new peer with its own libp2p host
+// CRC: crc-PeerManager.md
+// Sequence: seq-peer-creation.md
 func (m *Manager) CreatePeer(requestedPeerKey string) (peerID string, peerKey string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -371,6 +378,8 @@ func (m *Manager) getPeer(peerID string) (*Peer, error) {
 }
 
 // Start starts a protocol handler for a peer
+// CRC: crc-PeerManager.md
+// Sequence: seq-protocol-communication.md
 func (m *Manager) Start(peerID, protocolStr string) error {
 	p, err := m.getPeer(peerID)
 	if err != nil {
@@ -389,6 +398,8 @@ func (m *Manager) Stop(peerID, protocolStr string) error {
 }
 
 // Send sends data to a peer on a protocol
+// CRC: crc-PeerManager.md
+// Sequence: seq-protocol-communication.md
 func (m *Manager) Send(peerID, targetPeerID, protocolStr string, data any) error {
 	p, err := m.getPeer(peerID)
 	if err != nil {
@@ -398,6 +409,8 @@ func (m *Manager) Send(peerID, targetPeerID, protocolStr string, data any) error
 }
 
 // Subscribe subscribes a peer to a pub/sub topic
+// CRC: crc-PeerManager.md
+// Sequence: seq-pubsub-communication.md
 func (m *Manager) Subscribe(peerID, topic string) error {
 	p, err := m.getPeer(peerID)
 	if err != nil {
@@ -407,6 +420,8 @@ func (m *Manager) Subscribe(peerID, topic string) error {
 }
 
 // Publish publishes data to a topic from a peer
+// CRC: crc-PeerManager.md
+// Sequence: seq-pubsub-communication.md
 func (m *Manager) Publish(peerID, topic string, data any) error {
 	p, err := m.getPeer(peerID)
 	if err != nil {

@@ -1,3 +1,4 @@
+// CRC: crc-P2PWebAppClient.md, Spec: main.md
 import {
   Message,
   StringResponse,
@@ -18,6 +19,7 @@ interface PendingRequest {
   reject: (error: Error) => void;
 }
 
+// CRC: crc-P2PWebAppClient.md
 export class P2PWebAppClient {
   private ws: WebSocket | null = null;
   private _peerID: string | null = null;
@@ -40,6 +42,7 @@ export class P2PWebAppClient {
    * Connect to the WebSocket server and initialize peer identity
    * @param peerKey Optional peer key to restore previous identity
    * @returns Promise resolving to [peerID, peerKey] tuple
+   * CRC: crc-P2PWebAppClient.md
    */
   async connect(peerKey?: string): Promise<[string, string]> {
     const wsUrl = this.getDefaultWSUrl();

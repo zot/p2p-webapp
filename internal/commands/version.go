@@ -1,3 +1,4 @@
+// CRC: crc-CommandRouter.md, Spec: main.md
 package commands
 
 import (

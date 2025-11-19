@@ -6,6 +6,8 @@
 
 ### Knows
 - websocket: WebSocket connection to server
+- peerID: This client's peer ID (returned from connect(), null until connected)
+- peerKey: This client's peer key (returned from connect(), null until connected)
 - requestID: Current request ID counter
 - pendingRequests: Map of requestID to Promise resolvers
 - protocolListeners: Map of protocol to callback functions
@@ -13,6 +15,7 @@
 - ackCallbacks: Map of ack number to delivery confirmation callbacks
 - nextAckNumber: Next ack number to assign (auto-incrementing from 0)
 - messageQueue: Queue for sequential server-initiated message processing
+- fileListHandlers: Map of peerID to pending listFiles request handlers
 
 ### Does
 - connect: Connect to server and initialize peer (WebSocket + Peer command)
@@ -23,12 +26,18 @@
 - publish: Publish message to topic
 - unsubscribe: Unsubscribe from topic
 - listPeers: Get peers subscribed to topic
+- listFiles: Request file list from peer (manages deduplication for same peerID)
+- getFile: Request IPFS content by CID
+- storeFile: Store file or directory in this peer's directory (implicit peerID)
+- removeFile: Remove file or directory from this peer's directory (implicit peerID)
 - sendRequest: Send JSON-RPC request and return Promise
 - handleResponse: Process response messages (resolve pending Promises)
 - handleServerMessage: Queue and process server-initiated messages sequentially
 - routePeerData: Route peerData to protocol listener
 - routeTopicData: Route topicData to topic listener
 - routePeerChange: Route peerChange to topic listener
+- routePeerFiles: Route peerFiles to pending listFiles handlers
+- routeGotFile: Route gotFile to pending getFile handlers
 - routeAck: Invoke ack callback and remove from map
 
 ## Collaborators
@@ -42,3 +51,5 @@
 - seq-client-protocol.md: Protocol-based messaging flow
 - seq-client-pubsub.md: Topic subscription and publishing
 - seq-client-ack.md: Message delivery confirmation flow
+- seq-list-files.md: File list request with deduplication
+- seq-store-file.md: File storage on own peer

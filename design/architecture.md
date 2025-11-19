@@ -61,6 +61,17 @@
 **Design Elements**:
 - crc-P2PWebAppClient.md
 
+### IPFS File Management System
+
+**Purpose**: Per-peer IPFS file storage using HAMTDirectory, with ownership enforcement and cross-peer file list queries
+
+**Design Elements**:
+- crc-PeerManager.md (HAMTDirectory management, CID tracking)
+- crc-WebSocketHandler.md (ownership enforcement, request routing)
+- crc-P2PWebAppClient.md (client file API)
+- seq-list-files.md
+- seq-store-file.md
+
 ---
 
 ## Cross-Cutting Concerns
