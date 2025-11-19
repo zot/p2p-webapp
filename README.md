@@ -196,13 +196,14 @@ try {
 ### File Operations (IPFS)
 
 ```typescript
-// Store a file for this peer
+// Store a file for this peer (returns CID of stored node)
 const content = new TextEncoder().encode('Hello, world!');
-await client.storeFile('readme.txt', content, false);
+const fileCid = await client.storeFile('readme.txt', content, false);
+console.log('Stored file with CID:', fileCid);
 
-// Store a directory
-await client.storeFile('docs', null, true);
-await client.storeFile('docs/file1.txt', content, false);
+// Store a directory (returns CID of directory node)
+const dirCid = await client.storeFile('docs', null, true);
+const nestedFileCid = await client.storeFile('docs/file1.txt', content, false);
 
 // List files from any peer (local or remote)
 const { rootCID, entries } = await client.listFiles(peerID);
@@ -337,8 +338,9 @@ updateUserList(currentPeers);
 async function uploadFile(file: File) {
   const arrayBuffer = await file.arrayBuffer();
   const content = new Uint8Array(arrayBuffer);
-  await client.storeFile(file.name, content, false);
-  console.log(`Uploaded ${file.name}`);
+  const cid = await client.storeFile(file.name, content, false);
+  console.log(`Uploaded ${file.name} with CID: ${cid}`);
+  return cid;
 }
 
 // Share your file list in chat
@@ -627,32 +629,32 @@ A: This depends on network conditions and the IPFS/libp2p configuration. Small t
 
 ### Connection
 
-| Function | Description |
-|----------|-------------|
+| Function            | Description                                           |
+|---------------------|-------------------------------------------------------|
 | `connect(peerKey?)` | Create and connect a client (returns P2PWebAppClient) |
 
 ### Client Methods
 
-| Method | Description |
-|--------|-------------|
-| `subscribe(topic, onData, onPeerChange?)` | Join chat room with optional presence |
-| `publish(topic, data)` | Send to all room members |
-| `listPeers(topic)` | Get list of room members |
-| `start(protocol, onData)` | Listen for direct messages |
-| `send(peer, protocol, data)` | Send direct message (promise resolves on delivery) |
-| `unsubscribe(topic)` | Leave chat room |
-| `stop(protocol)` | Stop listening for direct messages |
-| `listFiles(peerID)` | List files for a peer (returns {rootCID, entries}) |
-| `getFile(cid)` | Get file or directory content by CID |
-| `storeFile(path, content, directory)` | Store file (content as Uint8Array) or directory (content = null) |
-| `removeFile(path)` | Remove a file from this peer's storage |
-| `close()` | Disconnect |
+| Method                                    | Description                                                                                  |
+|-------------------------------------------|----------------------------------------------------------------------------------------------|
+| `subscribe(topic, onData, onPeerChange?)` | Join chat room with optional presence                                                        |
+| `publish(topic, data)`                    | Send to all room members                                                                     |
+| `listPeers(topic)`                        | Get list of room members                                                                     |
+| `start(protocol, onData)`                 | Listen for direct messages                                                                   |
+| `send(peer, protocol, data)`              | Send direct message (promise resolves on delivery)                                           |
+| `unsubscribe(topic)`                      | Leave chat room                                                                              |
+| `stop(protocol)`                          | Stop listening for direct messages                                                           |
+| `listFiles(peerID)`                       | List files for a peer (returns {rootCID, entries})                                           |
+| `getFile(cid)`                            | Get file or directory content by CID                                                         |
+| `storeFile(path, content, directory)`     | Store file (content as Uint8Array) or directory (content = null), returns CID of stored node |
+| `removeFile(path)`                        | Remove a file from this peer's storage                                                       |
+| `close()`                                 | Disconnect                                                                                   |
 
 ### Client Properties
 
-| Property | Description |
-|----------|-------------|
-| `peerID` | Your peer ID (read-only) |
+| Property  | Description                           |
+|-----------|---------------------------------------|
+| `peerID`  | Your peer ID (read-only)              |
 | `peerKey` | Your peer key (read-only, save this!) |
 
 ## Building from Source

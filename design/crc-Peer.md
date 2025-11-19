@@ -31,7 +31,7 @@
 - stopMonitor: Stop monitoring topic
 - listFiles: Request file list from target peer (local or remote via p2p-webapp protocol)
 - getFile: Retrieve IPFS content by CID
-- storeFile: Create file/directory node in IPFS, update HAMTDirectory at path
+- storeFile: Create file/directory node in IPFS, update HAMTDirectory at path, return CID of stored node
 - removeFile: Remove file or directory from HAMTDirectory at path
 - handleGetFileList: Handle incoming getFileList() message on p2p-webapp protocol
 - handleFileList: Handle incoming fileList(CID, directory) message on p2p-webapp protocol

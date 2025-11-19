@@ -69,15 +69,15 @@ This sequence demonstrates the file storage operation with ownership enforcement
           │                                          │                                            │                              │    │ Update directoryCID│
           │                                          │                                            │                              │<───┘                     │
           │                                          │                                            │                              │                          │
-          │                                          │                               Return new root CID                         │                          │
+          │                                          │                        Return CID of stored file/directory node           │                          │
           │                                          │<──────────────────────────────────────────────────────────────────────────│                          │
           │                                          │                                            │                              │                          │
-          │      storeFile response (root CID)       │                                            │                              │                          │
+          │  storeFile response (CID of new node)    │                                            │                              │                          │
           │<─────────────────────────────────────────│                                            │                              │                          │
           │                                          │                                            │                              │                          │
-          │────┐                                  ╔══╧══════════════════════════════════╗         │                              │                          │
-          │    │ Update local rootDirectory CID   ║Client persists CID for restoration ░║         │                              │                          │
-          │<───┘                                  ╚══╤══════════════════════════════════╝         │                              │                          │
+          │────┐                                  ╔══╧══════════════════════════════╗             │                              │                          │
+          │    │ Store returned CID for sharing   ║Client can use CID for sharing  ░║             │                              │                          │
+          │<───┘                                  ╚══╤══════════════════════════════╝             │                              │                          │
      ┌────┴───┐                             ┌────────┴───────┐                              ┌─────┴─────┐                      ┌──┴─┐                ┌──────┴──────┐
      │Client A│                             │WebSocketHandler│                              │PeerManager│                      │Peer│                │HAMTDirectory│
      └────────┘                             └────────────────┘                              └───────────┘                      └────┘                └─────────────┘

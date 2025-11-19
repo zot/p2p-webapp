@@ -377,7 +377,7 @@ try {
 
 ---
 
-#### `storeFile(path: string, content: string | null, isDirectory: boolean): Promise<void>`
+#### `storeFile(path: string, content: string | null, isDirectory: boolean): Promise<string>`
 
 Store file or directory in peer's IPFS directory.
 
@@ -386,26 +386,29 @@ Store file or directory in peer's IPFS directory.
 - `content` - File content as Uint8Array, or null for directories
 - `isDirectory` - true for directory, false for file
 
-**Returns**: Promise resolving when stored
+**Returns**: Promise resolving to CID of the stored file/directory node
 
 **Throws**: Error if directory=false but content is null
 
 **Example**:
 ```typescript
 // Create directory
-await storeFile('docs', null, true);
+const dirCid = await storeFile('docs', null, true);
+console.log('Directory CID:', dirCid);
 
 // Store file
 const encoder = new TextEncoder();
 const content = encoder.encode('Hello, world!');
-await storeFile('docs/readme.txt', content, false);
+const fileCid = await storeFile('docs/readme.txt', content, false);
+console.log('File CID:', fileCid);
 ```
 
 **Notes**:
 - Content is automatically base64-encoded before transmission to support binary files
 - Automatically creates parent directories if needed
 - Updates peer's root directory CID after store
-- New CID should be saved for restoring directory state
+- Returns the CID of the stored node, which can be used to share or retrieve the file directly
+- The root directory CID can be obtained via `listFiles(client.peerID)`
 
 ---
 
@@ -790,30 +793,44 @@ Or error:
 - `content` (string | null) - Base64-encoded file content, null for directories
 - `directory` (boolean) - true for directory, false for file
 
-**Response**: `null`
+**Response**: `{ cid: string }`
+- `cid` - CID of the stored file/directory node
 
 **Error**: Error message if validation fails
 
 **Example**:
 ```json
-// Create directory
+// Request: Create directory
 {
   "requestID": 10,
   "command": "storeFile",
   "args": ["docs", null, true]
 }
 
-// Store file
+// Response
+{
+  "requestID": 10,
+  "result": { "cid": "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG" }
+}
+
+// Request: Store file
 {
   "requestID": 11,
   "command": "storeFile",
   "args": ["docs/readme.txt", "SGVsbG8sIHdvcmxkIQ==", false]
+}
+
+// Response
+{
+  "requestID": 11,
+  "result": { "cid": "QmXg9Pp2ytZ14xgmQjYEiHjVjMFXzCVVEcRTWJBmLgR39V" }
 }
 ```
 
 **Notes**:
 - Content must be base64-encoded for files (required for binary data)
 - Updates peer's root directory CID
+- Returns the CID of the specific node stored, not the root directory CID
 
 ---
 

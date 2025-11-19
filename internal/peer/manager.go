@@ -60,7 +60,7 @@ type PeerOperations interface {
 	// File operations
 	ListFiles(targetPeerID string) error
 	GetFile(cidStr string) error
-	StoreFile(filepath string, content []byte, directory bool) error
+	StoreFile(filepath string, content []byte, directory bool) (string, error)
 	RemoveFile(filepath string) error
 }
 
@@ -1344,9 +1344,9 @@ func (p *Peer) GetFile(cidStr string) error {
 // StoreFile stores file or directory in IPFS and adds it to the peer's HAMTDirectory
 // CRC: crc-Peer.md
 // Sequence: seq-store-file.md
-func (p *Peer) StoreFile(filepath string, content []byte, directory bool) error {
+func (p *Peer) StoreFile(filepath string, content []byte, directory bool) (string, error) {
 	if p.manager.ipfsPeer == nil {
-		return fmt.Errorf("IPFS peer not initialized")
+		return "", fmt.Errorf("IPFS peer not initialized")
 	}
 
 	p.mu.Lock()
@@ -1354,10 +1354,10 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) error 
 
 	// Validate parameters
 	if directory && content != nil {
-		return fmt.Errorf("directory cannot have content")
+		return "", fmt.Errorf("directory cannot have content")
 	}
 	if !directory && content == nil {
-		return fmt.Errorf("file must have content")
+		return "", fmt.Errorf("file must have content")
 	}
 
 	var newNode ipld.Node
@@ -1368,24 +1368,24 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) error 
 		// Create empty HAMTDirectory
 		dir, err := uio.NewHAMTDirectory(p.manager.ipfsPeer, 0)
 		if err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
+			return "", fmt.Errorf("failed to create directory: %w", err)
 		}
 		newNode, err = dir.GetNode()
 		if err != nil {
-			return fmt.Errorf("failed to get directory node: %w", err)
+			return "", fmt.Errorf("failed to get directory node: %w", err)
 		}
 	} else {
 		// Create file node
 		newNode, err = p.manager.ipfsPeer.AddFile(p.ctx, bytes.NewReader(content), nil)
 		if err != nil {
-			return fmt.Errorf("failed to add file to IPFS: %w", err)
+			return "", fmt.Errorf("failed to add file to IPFS: %w", err)
 		}
 	}
 
 	// Parse path to find parent directory and name
 	parentPath, name := path.Split(filepath)
 	if name == "" {
-		return fmt.Errorf("invalid path: must include file/directory name")
+		return "", fmt.Errorf("invalid path: must include file/directory name")
 	}
 
 	// Clean parent path
@@ -1425,7 +1425,7 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) error 
 			// Try to find existing subdirectory
 			links, err := currentDir.Links(p.ctx)
 			if err != nil {
-				return fmt.Errorf("failed to read directory: %w", err)
+				return "", fmt.Errorf("failed to read directory: %w", err)
 			}
 
 			found := false
@@ -1434,11 +1434,11 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) error 
 					// Found subdirectory, navigate into it
 					node, err := p.manager.ipfsPeer.Get(p.ctx, link.Cid)
 					if err != nil {
-						return fmt.Errorf("failed to get subdirectory: %w", err)
+						return "", fmt.Errorf("failed to get subdirectory: %w", err)
 					}
 					currentDir, err = uio.NewHAMTDirectoryFromNode(p.manager.ipfsPeer, node)
 					if err != nil {
-						return fmt.Errorf("failed to create directory from node: %w", err)
+						return "", fmt.Errorf("failed to create directory from node: %w", err)
 					}
 					found = true
 					break
@@ -1449,7 +1449,7 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) error 
 				// Create new subdirectory
 				currentDir, err = uio.NewHAMTDirectory(p.manager.ipfsPeer, 0)
 				if err != nil {
-					return fmt.Errorf("failed to create subdirectory: %w", err)
+					return "", fmt.Errorf("failed to create subdirectory: %w", err)
 				}
 			}
 
@@ -1461,7 +1461,7 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) error 
 	leafDir := dirStack[len(dirStack)-1].dir
 	leafDir, err = updateDir(leafDir, name, newNode)
 	if err != nil {
-		return fmt.Errorf("failed to add child: %w", err)
+		return "", fmt.Errorf("failed to add child: %w", err)
 	}
 
 	// Rebuild the tree from leaf to root
@@ -1473,13 +1473,13 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) error 
 		// Get updated child node
 		childNode, err := childDir.GetNode()
 		if err != nil {
-			return fmt.Errorf("failed to get child directory node: %w", err)
+			return "", fmt.Errorf("failed to get child directory node: %w", err)
 		}
 
 		// Update parent to point to new child
 		parentDir, err = updateDir(parentDir, childName, childNode)
 		if err != nil {
-			return fmt.Errorf("failed to update parent directory: %w", err)
+			return "", fmt.Errorf("failed to update parent directory: %w", err)
 		}
 
 		dirStack[i-1].dir = parentDir
@@ -1489,7 +1489,7 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) error 
 	p.directory = dirStack[0].dir
 	rootNode, err := p.directory.GetNode()
 	if err != nil {
-		return fmt.Errorf("failed to get updated directory node: %w", err)
+		return "", fmt.Errorf("failed to get updated directory node: %w", err)
 	}
 
 	newRootCID := rootNode.Cid()
@@ -1501,7 +1501,7 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) error 
 	}
 	p.logVerbose(2, "Stored %s: %s -> %s", typeStr, filepath, newNode.Cid().String())
 
-	return nil
+	return newNode.Cid().String(), nil
 }
 
 // RemoveFile removes a file or directory from the peer's HAMTDirectory

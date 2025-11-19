@@ -304,11 +304,19 @@ func (h *Handler) handleStoreFile(msg *Message, peerID string) (*Message, error)
 		}
 	}
 
-	if err := peer.StoreFile(req.Path, content, req.Directory); err != nil {
+	cid, err := peer.StoreFile(req.Path, content, req.Directory)
+	if err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
-	return h.emptyResponse(msg.RequestID)
+	// Return CID in response
+	response := map[string]string{"cid": cid}
+	result, _ := json.Marshal(response)
+	return &Message{
+		RequestID:  msg.RequestID,
+		IsResponse: true,
+		Result:     result,
+	}, nil
 }
 
 func (h *Handler) handleRemoveFile(msg *Message, peerID string) (*Message, error) {

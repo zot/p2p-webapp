@@ -380,7 +380,7 @@ Example entries object:
 Make a file or directory node (as indicated) and store it in ipfs-lite, which will return the new node. Content will be null for a directory, if directory is false, it is an error for content to be null.
 Use path to find the correct subdirectory in the peer's directory and add the new node there.
 Update the peer's CID after the change.
-### Response: null or error
+### Response: CID string of the stored file/directory node, or error
 
 ## removeFile(path: string)
 Use path to find the correct directory and remove the element from it.

@@ -178,6 +178,7 @@ export class P2PWebAppClient {
      * @param path File path identifier
      * @param content File content as Uint8Array (null for directories)
      * @param directory true = create directory, false = create file
+     * @returns Promise resolving to CID of the stored file/directory node
      */
     async storeFile(path, content, directory) {
         let base64Content;
@@ -189,7 +190,8 @@ export class P2PWebAppClient {
             }
             base64Content = btoa(binaryString);
         }
-        await this.sendRequest('storefile', { path, content: base64Content, directory });
+        const result = await this.sendRequest('storefile', { path, content: base64Content, directory });
+        return result.cid;
     }
     /**
      * Remove a file from this peer's storage

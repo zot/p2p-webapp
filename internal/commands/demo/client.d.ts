@@ -81,8 +81,9 @@ export declare class P2PWebAppClient {
      * @param path File path identifier
      * @param content File content as Uint8Array (null for directories)
      * @param directory true = create directory, false = create file
+     * @returns Promise resolving to CID of the stored file/directory node
      */
-    storeFile(path: string, content: Uint8Array | null, directory: boolean): Promise<void>;
+    storeFile(path: string, content: Uint8Array | null, directory: boolean): Promise<string>;
     /**
      * Remove a file from this peer's storage
      * @param path File path identifier
