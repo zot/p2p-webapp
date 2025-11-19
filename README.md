@@ -179,15 +179,55 @@ await client.start('/my-app/dm/1.0.0', (fromPeerID, data) => {
   console.log(`DM from ${fromPeerID}:`, data.message);
 });
 
-// Send to a specific peer
+// Send to a specific peer (promise resolves when delivered)
 await client.send(targetPeerID, '/my-app/dm/1.0.0', {
   message: 'Hi there!'
 });
 
-// Get delivery confirmation (optional)
-await client.send(targetPeerID, '/my-app/dm/1.0.0', data,
-  () => console.log('Message delivered!')
-);
+// Handle delivery confirmation
+try {
+  await client.send(targetPeerID, '/my-app/dm/1.0.0', data);
+  console.log('Message delivered!');
+} catch (error) {
+  console.error('Delivery failed:', error);
+}
+```
+
+### File Operations (IPFS)
+
+```typescript
+// Store a file for this peer
+const content = new TextEncoder().encode('Hello, world!');
+await client.storeFile('readme.txt', content, false);
+
+// Store a directory
+await client.storeFile('docs', null, true);
+await client.storeFile('docs/file1.txt', content, false);
+
+// List files from any peer (local or remote)
+const { rootCID, entries } = await client.listFiles(peerID);
+console.log('Root directory CID:', rootCID);
+for (const [path, entry] of Object.entries(entries)) {
+  console.log(`${path}: ${entry.type} (${entry.cid})`);
+  if (entry.mimeType) console.log(`  MIME: ${entry.mimeType}`);
+}
+
+// Get file content by CID
+const fileContent = await client.getFile(someCID);
+if (fileContent.type === 'file') {
+  // Decode base64 content
+  const bytes = Uint8Array.from(atob(fileContent.content), c => c.charCodeAt(0));
+  const text = new TextDecoder().decode(bytes);
+  console.log('File:', text, 'MIME:', fileContent.mimeType);
+} else {
+  // Directory
+  for (const [name, cid] of Object.entries(fileContent.entries)) {
+    console.log(`${name}: ${cid}`);
+  }
+}
+
+// Remove a file
+await client.removeFile('readme.txt');
 ```
 
 ### Cleaning Up
@@ -252,14 +292,14 @@ await client.start(PROTOCOL, (fromPeer, data) => {
   showNotification(`Message from ${fromPeer}: ${data.text}`);
 });
 
-// Send private message
+// Send private message with delivery confirmation
 async function sendPrivateMessage(toPeerID, text) {
-  await client.send(
-    toPeerID,
-    PROTOCOL,
-    { text },
-    () => showStatus('Delivered ✓')
-  );
+  try {
+    await client.send(toPeerID, PROTOCOL, { text });
+    showStatus('Delivered ✓');
+  } catch (error) {
+    showStatus('Failed to deliver');
+  }
 }
 ```
 
@@ -288,6 +328,53 @@ await client.subscribe('my-app',
 const currentPeers = await client.listPeers('my-app');
 currentPeers.forEach(p => onlinePeers.add(p));
 updateUserList(currentPeers);
+```
+
+### Example 4: File Sharing
+
+```typescript
+// Store files from user input
+async function uploadFile(file: File) {
+  const arrayBuffer = await file.arrayBuffer();
+  const content = new Uint8Array(arrayBuffer);
+  await client.storeFile(file.name, content, false);
+  console.log(`Uploaded ${file.name}`);
+}
+
+// Share your file list in chat
+await client.subscribe('file-sharing',
+  async (peerID, data) => {
+    if (data.action === 'list-files') {
+      // Someone requested file list, send ours
+      const { rootCID, entries } = await client.listFiles(client.peerID);
+      await client.publish('file-sharing', {
+        action: 'files',
+        peerID: client.peerID,
+        rootCID,
+        files: Object.keys(entries)
+      });
+    } else if (data.action === 'download') {
+      // Someone wants to download a file by CID
+      showDownloadNotification(data.peerID, data.filename, data.cid);
+    }
+  }
+);
+
+// Download a file from another peer
+async function downloadFile(cid: string, filename: string) {
+  const content = await client.getFile(cid);
+  if (content.type === 'file') {
+    // Convert base64 to blob and download
+    const bytes = Uint8Array.from(atob(content.content), c => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: content.mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+}
 ```
 
 ## Project Structure
@@ -552,9 +639,13 @@ A: This depends on network conditions and the IPFS/libp2p configuration. Small t
 | `publish(topic, data)` | Send to all room members |
 | `listPeers(topic)` | Get list of room members |
 | `start(protocol, onData)` | Listen for direct messages |
-| `send(peer, protocol, data, onAck?)` | Send direct message with optional confirmation |
+| `send(peer, protocol, data)` | Send direct message (promise resolves on delivery) |
 | `unsubscribe(topic)` | Leave chat room |
 | `stop(protocol)` | Stop listening for direct messages |
+| `listFiles(peerID)` | List files for a peer (returns {rootCID, entries}) |
+| `getFile(cid)` | Get file or directory content by CID |
+| `storeFile(path, content, directory)` | Store file (content as Uint8Array) or directory (content = null) |
+| `removeFile(path)` | Remove a file from this peer's storage |
 | `close()` | Disconnect |
 
 ### Client Properties
