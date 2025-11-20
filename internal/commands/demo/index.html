@@ -80,6 +80,21 @@
             color: white;
         }
 
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .status.connecting::before {
+            content: "⟳ ";
+            display: inline-block;
+            animation: spin 1s linear infinite;
+        }
+
         #mode-indicator {
             background: #34495e;
             color: white;
@@ -343,6 +358,10 @@
         }
 
         .file-tree-item {
+
+        }
+
+        .file-tree-item-header {
             padding: 0.5rem;
             margin: 0.25rem 0;
             border-radius: 4px;
@@ -353,52 +372,52 @@
             transition: background 0.2s;
         }
 
-        .file-tree-item:hover {
+        .file-tree-item-header:hover {
             background: #f8f9fa;
         }
 
-        .file-tree-item.directory {
+        .file-tree-item.directory > .file-tree-item-header {
             font-weight: 500;
         }
 
-        .file-tree-item.selected {
+        .file-tree-item.selected > .file-tree-item-header {
             background: #e3f2fd;
             border-left: 3px solid #2196f3;
         }
 
-        .file-tree-item .icon {
+        .file-tree-item-header .icon {
             width: 20px;
             text-align: center;
         }
 
-        .file-tree-item .expand-icon {
+        .file-tree-item-header .expand-icon {
             width: 16px;
             cursor: pointer;
             user-select: none;
         }
 
-        .file-tree-item .name {
+        .file-tree-item-header .name {
             flex: 1;
         }
 
-        .file-tree-item .cid {
+        .file-tree-item-header .cid {
             font-size: 0.75rem;
             font-family: monospace;
             opacity: 0.6;
         }
 
-        .file-tree-item .actions {
+        .file-tree-item-header .actions {
             display: flex;
             gap: 0.25rem;
         }
 
-        .file-tree-item .action-btn {
+        .file-tree-item-header .action-btn {
             padding: 0.25rem 0.5rem;
             font-size: 0.75rem;
             background: #3498db;
         }
 
-        .file-tree-item .action-btn:hover {
+        .file-tree-item-header .action-btn:hover {
             background: #2980b9;
         }
 
@@ -406,7 +425,7 @@
             margin-left: 1.5rem;
         }
 
-        .file-tree-item.collapsed > .file-tree-children {
+        .file-tree-item.collapsed .file-tree-item-header + .file-tree-children {
             display: none;
         }
 
@@ -527,7 +546,16 @@
         let currentFilePeerID = null; // Peer whose files we're viewing
         let currentFileEntries = {}; // Current file tree entries
         let expandedDirs = new Set(); // Track expanded directories
-        let selectedFolder = ''; // Currently selected folder path ('' = root)
+
+        // Encapsulated folder selection with logging
+        let _selectedFolder = ''; // Currently selected folder path ('' = root)
+        let selectedFolder = {
+            get: () => _selectedFolder,
+            set: (value) => {
+                //console.log(`[FOLDER SELECTION] "${_selectedFolder}" -> "${value}"`);
+                _selectedFolder = value;
+            }
+        };
 
         function storeRoomMessage(senderPeerID, text, isOwn) {
             roomMessages.push({
@@ -694,9 +722,9 @@
         // File browser functions
         function updateSelectedFolderIndicator() {
             const isOwnFiles = currentFilePeerID === client.peerID;
-            if (isOwnFiles && selectedFolder) {
+            if (isOwnFiles && selectedFolder.get()) {
                 selectedFolderIndicator.style.display = 'block';
-                selectedFolderPath.textContent = '/' + selectedFolder;
+                selectedFolderPath.textContent = '/' + selectedFolder.get();
             } else {
                 selectedFolderIndicator.style.display = 'none';
             }
@@ -755,19 +783,28 @@
                 const itemDiv = document.createElement('div');
                 itemDiv.className = 'file-tree-item' + (entry.type === 'directory' ? ' directory' : '');
 
+                // Create header div to hold the item's content
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'file-tree-item-header';
+
                 if (entry.type === 'directory') {
                     const isExpanded = expandedDirs.has(itemPath);
-                    const isSelected = selectedFolder === itemPath;
+                    const isSelected = selectedFolder.get() === itemPath;
                     itemDiv.classList.toggle('collapsed', !isExpanded);
                     itemDiv.classList.toggle('selected', isSelected);
 
-                    // Click folder to select it
-                    itemDiv.onclick = (e) => {
+                    // Click folder to toggle selection
+                    headerDiv.onclick = (e) => {
                         // Don't select if clicking expand icon
                         if (e.target.classList.contains('expand-icon')) {
                             return;
                         }
-                        selectedFolder = itemPath;
+                        // Toggle selection: if already selected, deselect; otherwise select
+                        if (selectedFolder.get() === itemPath) {
+                            selectedFolder.set('');
+                        } else {
+                            selectedFolder.set(itemPath);
+                        }
                         renderFileTree(currentFileEntries, fileTreeDiv);
                     };
 
@@ -783,24 +820,24 @@
                         }
                         renderFileTree(currentFileEntries, fileTreeDiv);
                     };
-                    itemDiv.appendChild(expandIcon);
+                    headerDiv.appendChild(expandIcon);
                 }
 
                 const icon = document.createElement('span');
                 icon.className = 'icon';
                 icon.textContent = entry.type === 'directory' ? '📁' : '📄';
-                itemDiv.appendChild(icon);
+                headerDiv.appendChild(icon);
 
                 const nameSpan = document.createElement('span');
                 nameSpan.className = 'name';
                 nameSpan.textContent = name;
-                itemDiv.appendChild(nameSpan);
+                headerDiv.appendChild(nameSpan);
 
                 if (entry.cid) {
                     const cidSpan = document.createElement('span');
                     cidSpan.className = 'cid';
                     cidSpan.textContent = '...' + entry.cid.slice(-12);
-                    itemDiv.appendChild(cidSpan);
+                    headerDiv.appendChild(cidSpan);
 
                     // Add download button for files
                     if (entry.type === 'file') {
@@ -815,26 +852,28 @@
                             downloadFile(entry.cid, name);
                         };
                         actions.appendChild(downloadBtn);
-                        itemDiv.appendChild(actions);
+                        headerDiv.appendChild(actions);
                     }
                 }
 
-                container.appendChild(itemDiv);
+                itemDiv.appendChild(headerDiv);
 
                 // Render children if directory and expanded
                 if (entry.type === 'directory' && entry.children) {
                     const childrenDiv = document.createElement('div');
                     childrenDiv.className = 'file-tree-children';
                     renderFileTree(entry.children, childrenDiv, itemPath);
-                    container.appendChild(childrenDiv);
+                    itemDiv.appendChild(childrenDiv);
                 }
+
+                container.appendChild(itemDiv);
             }
         }
 
         async function loadPeerFiles(peerID) {
-            // Only reset selection when actually switching to a different peer
-            if (currentFilePeerID !== peerID) {
-                selectedFolder = '';
+            // Only reset selection when actually switching to a different peer (not on initial load)
+            if (currentFilePeerID !== null && currentFilePeerID !== peerID) {
+                selectedFolder.set('');
             }
             currentFilePeerID = peerID;
             fileTreeDiv.innerHTML = '<div style="padding: 1rem; text-align: center; color: #999;">Loading...</div>';
@@ -848,6 +887,8 @@
                 const isOwnFiles = peerID === client.peerID;
                 uploadFileBtn.disabled = !isOwnFiles;
                 createDirBtn.disabled = !isOwnFiles;
+                uploadFileBtn.textContent = isOwnFiles ? 'Upload File' : '🚫 Upload File';
+                createDirBtn.textContent = isOwnFiles ? 'New Folder' : '🚫 New Folder';
                 dropZone.classList.toggle('hidden', !isOwnFiles);
             } catch (error) {
                 console.error('Failed to load files:', error);
@@ -889,8 +930,8 @@
                     const content = await file.arrayBuffer();
                     const uint8Array = new Uint8Array(content);
                     // Prefix with selected folder path
-                    const filePath = selectedFolder ? `${selectedFolder}/${file.name}` : file.name;
-                    await client.storeFile(filePath, uint8Array, false);
+                    const filePath = selectedFolder.get() ? `${selectedFolder.get()}/${file.name}` : file.name;
+                    await client.storeFile(filePath, uint8Array);
                 } catch (error) {
                     console.error(`Failed to upload ${file.name}:`, error);
                     alert(`Failed to upload ${file.name}`);
@@ -898,8 +939,8 @@
             }
 
             // Expand the selected folder so uploaded files are visible
-            if (selectedFolder) {
-                expandedDirs.add(selectedFolder);
+            if (selectedFolder.get()) {
+                expandedDirs.add(selectedFolder.get());
             }
 
             // Reload file list
@@ -912,18 +953,17 @@
 
             try {
                 // Prefix with selected folder path
-                const dirPath = selectedFolder ? `${selectedFolder}/${dirName}` : dirName;
-                console.log('Creating directory:', dirPath);
-                await client.storeFile(dirPath, null, true);
+                const dirPath = selectedFolder.get() ? `${selectedFolder.get()}/${dirName}` : dirName;
+                await client.createDirectory(dirPath);
 
-                // Select the newly created directory and expand it
-                selectedFolder = dirPath;
+                // Expand the newly created directory
                 expandedDirs.add(dirPath);
-                console.log('Set selectedFolder to:', selectedFolder);
-                console.log('Before loadPeerFiles, currentFilePeerID:', currentFilePeerID);
 
+                // Set the selection BEFORE reloading so loadPeerFiles sees it
+                selectedFolder.set(dirPath);
+
+                // Reload the file list (this will render with the selection)
                 await loadPeerFiles(client.peerID);
-                console.log('After loadPeerFiles, selectedFolder:', selectedFolder);
             } catch (error) {
                 console.error('Failed to create directory:', error);
                 alert('Failed to create directory');
@@ -1019,7 +1059,7 @@
                 client = await connect();
 
                 peerIDDiv.textContent = `Your Peer ID: ${client.peerID}`;
-                setStatus('Connected', 'connected');
+                setStatus('Connecting to network...', 'connecting');
 
                 // Start protocol with listener for direct messages
                 // The listener receives (peer, data) for all messages on this protocol
@@ -1037,6 +1077,17 @@
                     ROOM_TOPIC,
                     // Message callback
                     (senderPeerID, data) => {
+                        // Handle file update notifications
+                        if (data.type === 'p2p-webapp-file-update' && data.peer) {
+                            // If we're currently viewing this peer's files, refresh the file list
+                            if (currentFilePeerID === data.peer && currentTab === 'files') {
+                                client.listFiles(data.peer).catch(err => {
+                                    console.error('Error refreshing file list:', err);
+                                });
+                            }
+                            return; // Don't process as a chat message
+                        }
+
                         if (senderPeerID !== client.peerID) {
                             // Always store room messages
                             storeRoomMessage(senderPeerID, data.text, false);
@@ -1058,6 +1109,9 @@
                         }
                     }
                 );
+
+                // Now connected to pubsub group - show connected status
+                setStatus('Connected', 'connected');
 
                 // Get initial peer list
                 try {

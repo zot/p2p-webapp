@@ -10,6 +10,7 @@
 - aliasCounter: Counter for generating unique aliases
 - verbosity: Logging verbosity level
 - ipfsPeer: IPFS peer for file storage operations
+- fileUpdateNotifyTopic: Optional topic for publishing file change notifications (from config)
 - onPeerData: Callback for protocol data events
 - onTopicData: Callback for topic data events
 - onPeerChange: Callback for topic peer join/leave events

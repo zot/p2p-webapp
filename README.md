@@ -61,6 +61,13 @@ make build
 
 The bundled binary ships with a complete chatroom demo. Open the URL in multiple browser tabs or windows to see peers connecting to each other. Try the group chat and direct messages!
 
+**Connection Status:** The demo shows a status indicator at the top:
+- **"Connecting to server..."** - WebSocket connection in progress
+- **"Connecting to network..." ⟳** - Joining the pubsub group (spinning indicator)
+- **"Connected"** - Fully connected and ready! The peer is now a member of the pubsub group and can send/receive messages
+
+The "Connected" status means your peer has successfully joined the gossipsub network and is ready for all P2P operations.
+
 ### 3. Build Your Own App
 
 Extract the client library:
@@ -196,14 +203,18 @@ try {
 ### File Operations (IPFS)
 
 ```typescript
-// Store a file for this peer (returns CID of stored node)
-const content = new TextEncoder().encode('Hello, world!');
-const fileCid = await client.storeFile('readme.txt', content, false);
-console.log('Stored file with CID:', fileCid);
+// Store a text file (string content)
+const textCid = await client.storeFile('readme.txt', 'Hello, world!');
+console.log('Stored text file with CID:', textCid);
 
-// Store a directory (returns CID of directory node)
-const dirCid = await client.storeFile('docs', null, true);
-const nestedFileCid = await client.storeFile('docs/file1.txt', content, false);
+// Store a binary file (Uint8Array content)
+const binaryContent = new Uint8Array([0x89, 0x50, 0x4E, 0x47]); // PNG header
+const binaryCid = await client.storeFile('image.png', binaryContent);
+console.log('Stored binary file with CID:', binaryCid);
+
+// Create a directory (returns CID of directory node)
+const dirCid = await client.createDirectory('docs');
+const nestedFileCid = await client.storeFile('docs/file1.txt', 'File content');
 
 // List files from any peer (local or remote)
 const { rootCID, entries } = await client.listFiles(peerID);
@@ -230,6 +241,46 @@ if (fileContent.type === 'file') {
 // Remove a file
 await client.removeFile('readme.txt');
 ```
+
+### File Change Notifications
+
+Get notified when peers update their files - perfect for collaborative file browsers and real-time file sharing apps:
+
+```typescript
+// Configure in p2p-webapp.toml:
+// [p2p]
+// fileUpdateNotifyTopic = "my-app-files"
+
+// Subscribe to a topic that handles both chat and file notifications
+await client.subscribe('my-app-files',
+  (peerID, data) => {
+    // Handle file update notifications
+    if (data.type === 'p2p-webapp-file-update') {
+      console.log(`${data.peer} updated their files!`);
+      // Refresh file list if viewing this peer's files
+      if (currentlyViewingPeer === data.peer) {
+        const { rootCID, entries } = await client.listFiles(data.peer);
+        updateFileListUI(entries);
+      }
+      return; // Don't process as regular message
+    }
+    // Handle regular messages
+    handleChatMessage(peerID, data);
+  }
+);
+
+// File operations automatically trigger notifications when configured
+await client.storeFile('data.json', JSON.stringify(myData));
+// → Other peers subscribed to the topic receive notification
+// → They can automatically refresh their view of your files
+```
+
+**How it works:**
+- Enable in config: Set `fileUpdateNotifyTopic` in `p2p-webapp.toml`
+- Privacy-friendly: Notifications only sent if you're subscribed to the topic (opt-in)
+- Automatic: `storeFile()`, `createDirectory()`, and `removeFile()` trigger notifications
+- Message format: `{"type":"p2p-webapp-file-update","peer":"<peerID>"}`
+- Use case: Real-time file browsers, collaborative editors, shared folders
 
 ### Cleaning Up
 
@@ -331,21 +382,36 @@ currentPeers.forEach(p => onlinePeers.add(p));
 updateUserList(currentPeers);
 ```
 
-### Example 4: File Sharing
+### Example 4: File Sharing with Auto-Refresh
 
 ```typescript
+// Configure in p2p-webapp.toml: fileUpdateNotifyTopic = "file-sharing"
+
+let currentViewingPeer = null;
+
 // Store files from user input
 async function uploadFile(file: File) {
   const arrayBuffer = await file.arrayBuffer();
   const content = new Uint8Array(arrayBuffer);
-  const cid = await client.storeFile(file.name, content, false);
+  const cid = await client.storeFile(file.name, content);
   console.log(`Uploaded ${file.name} with CID: ${cid}`);
+  // Automatically notifies other peers if topic is configured!
   return cid;
 }
 
-// Share your file list in chat
+// Subscribe to file-sharing topic with automatic refresh
 await client.subscribe('file-sharing',
   async (peerID, data) => {
+    // Handle file update notifications
+    if (data.type === 'p2p-webapp-file-update') {
+      // A peer updated their files - refresh if we're viewing them
+      if (currentViewingPeer === data.peer) {
+        await refreshFileList(data.peer);
+      }
+      return;
+    }
+
+    // Handle file sharing messages
     if (data.action === 'list-files') {
       // Someone requested file list, send ours
       const { rootCID, entries } = await client.listFiles(client.peerID);
@@ -356,11 +422,21 @@ await client.subscribe('file-sharing',
         files: Object.keys(entries)
       });
     } else if (data.action === 'download') {
-      // Someone wants to download a file by CID
       showDownloadNotification(data.peerID, data.filename, data.cid);
     }
   }
 );
+
+// View a peer's files (with auto-refresh on updates)
+async function viewPeerFiles(peerID: string) {
+  currentViewingPeer = peerID;
+  await refreshFileList(peerID);
+}
+
+async function refreshFileList(peerID: string) {
+  const { rootCID, entries } = await client.listFiles(peerID);
+  displayFileList(entries);
+}
 
 // Download a file from another peer
 async function downloadFile(cid: string, filename: string) {
@@ -525,6 +601,159 @@ Each user runs their own local server (or shares one). No central server needed!
 
 **Want to see how it works?** Extract the demo with `./p2p-webapp extract` to examine the source code.
 
+## Configuration
+
+p2p-webapp supports optional configuration via a `p2p-webapp.toml` file at your site root.
+
+### Quick Start
+
+Create `p2p-webapp.toml` in your site directory (same level as `html/`, `ipfs/`, `storage/`):
+
+```toml
+[http]
+# Enable caching for production
+cacheControl = "public, max-age=3600, immutable"
+
+[behavior]
+# Don't auto-open browser
+autoOpenBrowser = false
+
+[server]
+# Use a specific port
+port = 8080
+```
+
+### Configuration File Location
+
+- **Directory mode (`--dir`)**: Place in the base directory
+- **Bundle mode**: Include in root before bundling with `./p2p-webapp bundle`
+
+### Common Configurations
+
+**Development (default):**
+```toml
+[http]
+cacheControl = "no-cache, no-store, must-revalidate"  # No caching
+
+[behavior]
+autoOpenBrowser = true   # Open browser automatically
+autoExitTimeout = "5s"   # Exit 5 seconds after last connection
+```
+
+**Production:**
+```toml
+[http]
+cacheControl = "public, max-age=3600, immutable"  # Cache for 1 hour
+
+[http.security]
+xContentTypeOptions = "nosniff"
+xFrameOptions = "DENY"
+
+[behavior]
+linger = true           # Keep server running
+autoExitTimeout = "0s"  # Disable auto-exit
+```
+
+**Testing:**
+```toml
+[behavior]
+autoOpenBrowser = false  # Don't open browser
+linger = true            # Keep server running
+
+[server]
+port = 9000              # Use specific port
+```
+
+**File Sharing with Notifications:**
+```toml
+[p2p]
+# Enable automatic file change notifications
+fileUpdateNotifyTopic = "my-app-files"
+
+[behavior]
+linger = true  # Keep server running for file sharing
+```
+
+When `fileUpdateNotifyTopic` is configured and your peer subscribes to that topic, file operations (`storeFile`, `createDirectory`, `removeFile`) automatically publish notifications. Other peers can listen for these notifications to update their UI in real-time when files change.
+
+### All Configuration Options
+
+Complete reference of all settings in `p2p-webapp.toml`:
+
+#### `[server]` - Server Settings
+```toml
+port = 10000              # Starting port (default: 10000)
+portRange = 100           # Ports to try if starting port unavailable (default: 100)
+maxHeaderBytes = 1048576  # Max request header size in bytes (default: 1MB)
+```
+
+#### `[server.timeouts]` - Server Timeouts
+```toml
+read = "15s"        # Max duration for reading entire request
+write = "15s"       # Max duration for writing response
+idle = "60s"        # Max duration to wait for next request
+readHeader = "5s"   # Max duration for reading request headers
+```
+
+#### `[http]` - HTTP Headers
+```toml
+cacheControl = "no-cache, no-store, must-revalidate"  # Cache-Control header
+```
+
+#### `[http.security]` - Security Headers
+```toml
+xContentTypeOptions = "nosniff"        # X-Content-Type-Options header
+xFrameOptions = "DENY"                 # X-Frame-Options header
+contentSecurityPolicy = ""             # Content-Security-Policy (default: not set)
+```
+
+#### `[http.cors]` - CORS Settings
+```toml
+enabled = false             # Enable CORS headers (default: false)
+allowOrigin = ""            # Access-Control-Allow-Origin header
+allowMethods = []           # Access-Control-Allow-Methods header
+allowHeaders = []           # Access-Control-Allow-Headers header
+```
+
+#### `[websocket]` - WebSocket Settings
+```toml
+checkOrigin = false         # Validate WebSocket origin (default: false)
+allowedOrigins = []         # List of allowed origins (requires checkOrigin = true)
+readBufferSize = 1024       # WebSocket read buffer in bytes
+writeBufferSize = 1024      # WebSocket write buffer in bytes
+```
+
+#### `[behavior]` - Application Behavior
+```toml
+autoExitTimeout = "5s"      # Auto-exit timeout when no connections (default: "5s")
+autoOpenBrowser = true      # Automatically open browser on startup
+linger = false              # Keep server running after all connections close
+verbosity = 0               # Verbosity level 0-3 (default: 0)
+```
+
+#### `[files]` - File Serving
+```toml
+indexFile = "index.html"    # File to serve for SPA routes
+spaFallback = true          # Enable SPA routing fallback
+```
+
+#### `[p2p]` - P2P Settings
+```toml
+protocolName = "/p2p-webapp/1.0.0"  # Reserved libp2p protocol for file list queries
+fileUpdateNotifyTopic = ""          # Optional topic for file update notifications (default: disabled)
+```
+
+See `p2p-webapp.example.toml` for a fully commented example configuration.
+
+### Priority
+
+Settings are applied in this order (highest to lowest):
+1. **Command-line flags** (e.g., `-p 8080`, `--noopen`)
+2. **Configuration file** (`p2p-webapp.toml`)
+3. **Default values**
+
+This means you can override config file settings with command-line flags.
+
 ## Advanced Features
 
 ### Persistent Identity
@@ -635,20 +864,23 @@ A: This depends on network conditions and the IPFS/libp2p configuration. Small t
 
 ### Client Methods
 
-| Method                                    | Description                                                                                  |
-|-------------------------------------------|----------------------------------------------------------------------------------------------|
-| `subscribe(topic, onData, onPeerChange?)` | Join chat room with optional presence                                                        |
-| `publish(topic, data)`                    | Send to all room members                                                                     |
-| `listPeers(topic)`                        | Get list of room members                                                                     |
-| `start(protocol, onData)`                 | Listen for direct messages                                                                   |
-| `send(peer, protocol, data)`              | Send direct message (promise resolves on delivery)                                           |
-| `unsubscribe(topic)`                      | Leave chat room                                                                              |
-| `stop(protocol)`                          | Stop listening for direct messages                                                           |
-| `listFiles(peerID)`                       | List files for a peer (returns {rootCID, entries})                                           |
-| `getFile(cid)`                            | Get file or directory content by CID                                                         |
-| `storeFile(path, content, directory)`     | Store file (content as Uint8Array) or directory (content = null), returns CID of stored node |
-| `removeFile(path)`                        | Remove a file from this peer's storage                                                       |
-| `close()`                                 | Disconnect                                                                                   |
+| Method                                    | Description                                                                   |
+|-------------------------------------------|-------------------------------------------------------------------------------|
+| `subscribe(topic, onData, onPeerChange?)` | Join chat room with optional presence                                         |
+| `publish(topic, data)`                    | Send to all room members                                                      |
+| `listPeers(topic)`                        | Get list of room members                                                      |
+| `start(protocol, onData)`                 | Listen for direct messages                                                    |
+| `send(peer, protocol, data)`              | Send direct message (promise resolves on delivery)                            |
+| `unsubscribe(topic)`                      | Leave chat room                                                               |
+| `stop(protocol)`                          | Stop listening for direct messages                                            |
+| `listFiles(peerID)`                       | List files for a peer (returns {rootCID, entries})                            |
+| `getFile(cid)`                            | Get file or directory content by CID                                          |
+| `storeFile(path, content)`*               | Store file (content as string or Uint8Array), returns CID of stored file node |
+| `createDirectory(path)`*                  | Create directory, returns CID of stored directory node                        |
+| `removeFile(path)`*                       | Remove a file from this peer's storage                                        |
+| `close()`                                 | Disconnect                                                                    |
+
+\* Triggers file update notification if `fileUpdateNotifyTopic` is configured and peer is subscribed
 
 ### Client Properties
 

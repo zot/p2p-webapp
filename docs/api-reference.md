@@ -32,7 +32,7 @@ This copies:
 ### Import
 
 ```typescript
-import { connect, start, stop, send, subscribe, publish, unsubscribe, listPeers, listFiles, getFile, storeFile, removeFile } from './client.js';
+import { connect, start, stop, send, subscribe, publish, unsubscribe, listPeers, listFiles, getFile, storeFile, createDirectory, removeFile } from './client.js';
 ```
 
 Or with named export:
@@ -203,6 +203,50 @@ await subscribe('chatroom',
 - Messages from all topic subscribers received
 - Callbacks can be sync or async
 - Messages processed sequentially
+- **File Update Notifications**: Topics can receive special file availability notifications (see below)
+
+**File Update Notifications**:
+
+When `fileUpdateNotifyTopic` is configured in `p2p-webapp.toml`, the server automatically publishes file availability notifications to that topic after `storeFile()` / `removeFile()` operations (only if the peer is subscribed).
+
+Applications can detect and handle these notifications:
+
+```typescript
+await subscribe('chatroom', (peer, data) => {
+  // Check for file update notification
+  if (data.type === 'p2p-webapp-file-update' && data.peer) {
+    console.log(`Peer ${data.peer} updated their files`);
+
+    // Refresh file list if viewing this peer's files
+    if (currentViewPeer === data.peer) {
+      await listFiles(data.peer);
+    }
+    return; // Don't process as regular message
+  }
+
+  // Handle regular messages
+  console.log(`${peer}: ${data.text}`);
+});
+```
+
+**Notification Message Format**:
+```typescript
+{
+  type: "p2p-webapp-file-update",
+  peer: "<peerID>"  // Peer whose files changed
+}
+```
+
+**Configuration** (in `p2p-webapp.toml`):
+```toml
+[p2p]
+fileUpdateNotifyTopic = "chatroom"  # Topic for notifications (empty = disabled)
+```
+
+**Privacy Design**:
+- Notifications only published if topic is configured AND peer is subscribed
+- Opt-in mechanism prevents unintended broadcasts
+- Applications control whether to handle notifications
 
 ---
 
@@ -377,38 +421,70 @@ try {
 
 ---
 
-#### `storeFile(path: string, content: string | null, isDirectory: boolean): Promise<string>`
+#### `storeFile(path: string, content: string | Uint8Array): Promise<string>`
 
-Store file or directory in peer's IPFS directory.
+Store file in peer's IPFS directory.
 
 **Parameters**:
 - `path` - Unix-style path relative to root (e.g., "docs/readme.txt")
-- `content` - File content as Uint8Array, or null for directories
-- `isDirectory` - true for directory, false for file
+- `content` - File content as string or Uint8Array
 
-**Returns**: Promise resolving to CID of the stored file/directory node
-
-**Throws**: Error if directory=false but content is null
+**Returns**: Promise resolving to CID of the stored file node
 
 **Example**:
 ```typescript
-// Create directory
-const dirCid = await storeFile('docs', null, true);
-console.log('Directory CID:', dirCid);
+// Store text file with string
+const textCid = await storeFile('readme.txt', 'Hello, world!');
+console.log('Text file CID:', textCid);
 
-// Store file
-const encoder = new TextEncoder();
-const content = encoder.encode('Hello, world!');
-const fileCid = await storeFile('docs/readme.txt', content, false);
-console.log('File CID:', fileCid);
+// Store binary file with Uint8Array
+const binaryContent = new Uint8Array([0x89, 0x50, 0x4E, 0x47]);
+const binaryCid = await storeFile('image.png', binaryContent);
+console.log('Binary file CID:', binaryCid);
 ```
 
 **Notes**:
-- Content is automatically base64-encoded before transmission to support binary files
+- String content is UTF-8 encoded
+- Content is automatically base64-encoded before transmission
 - Automatically creates parent directories if needed
 - Updates peer's root directory CID after store
+- **File Update Notifications**: If configured, automatically publishes notification to subscribers after successful storage
+
+**Automatic Notifications**:
+
+When `fileUpdateNotifyTopic` is configured in `p2p-webapp.toml` and the peer is subscribed to that topic, the server automatically publishes a file availability notification after successful `storeFile()` operations. Subscribers can detect and handle these notifications to refresh file lists.
+
+See [`subscribe()` File Update Notifications](#file-update-notifications) for handling example.
+
+---
+
+#### `createDirectory(path: string): Promise<string>`
+
+Create directory in peer's IPFS directory.
+
+**Parameters**:
+- `path` - Unix-style path relative to root (e.g., "docs")
+
+**Returns**: Promise resolving to CID of the stored directory node
+
+**Example**:
+```typescript
+const dirCid = await createDirectory('docs');
+console.log('Directory CID:', dirCid);
+```
+
+**Notes**:
+- Automatically creates parent directories if needed
+- Updates peer's root directory CID after creation
 - Returns the CID of the stored node, which can be used to share or retrieve the file directly
 - The root directory CID can be obtained via `listFiles(client.peerID)`
+- **File Update Notifications**: If configured, automatically publishes notification to subscribers after successful directory creation
+
+**Automatic Notifications**:
+
+When `fileUpdateNotifyTopic` is configured in `p2p-webapp.toml` and the peer is subscribed to that topic, the server automatically publishes a file availability notification after successful `createDirectory()` operations. Subscribers can detect and handle these notifications to refresh file lists.
+
+See [`subscribe()` File Update Notifications](#file-update-notifications) for handling example.
 
 ---
 
@@ -430,6 +506,13 @@ await removeFile('docs/readme.txt');
 - Removes entry from parent directory
 - Updates peer's root directory CID
 - Removing a directory removes all contents
+- **File Update Notifications**: If configured, automatically publishes notification to subscribers after successful removal
+
+**Automatic Notifications**:
+
+When `fileUpdateNotifyTopic` is configured in `p2p-webapp.toml` and the peer is subscribed to that topic, the server automatically publishes a file availability notification after successful `removeFile()` operations. Subscribers can detect and handle these notifications to refresh file lists.
+
+See [`subscribe()` File Update Notifications](#file-update-notifications) for handling example.
 
 ---
 

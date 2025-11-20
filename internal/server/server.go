@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zot/p2p-webapp/internal/config"
 	"github.com/zot/p2p-webapp/internal/peer"
 	"github.com/zot/p2p-webapp/internal/pidfile"
 	"github.com/zot/p2p-webapp/internal/protocol"
@@ -31,6 +32,7 @@ type Server struct {
 	httpServer     *http.Server
 	peerManager    *peer.Manager
 	handler        *protocol.Handler
+	config         *config.Config
 	port           int
 	fileSystem     http.FileSystem
 	connections    map[*WSConnection]bool
@@ -124,18 +126,19 @@ func (zf *zipFile) Stat() (os.FileInfo, error) {
 // NewServerFromDir creates a new HTTP server serving from a filesystem directory
 // CRC: crc-Server.md
 // Sequence: seq-server-startup.md
-func NewServerFromDir(ctx context.Context, pm *peer.Manager, htmlDir string, port int, linger bool, verbosity int) *Server {
+func NewServerFromDir(ctx context.Context, pm *peer.Manager, cfg *config.Config, htmlDir string) *Server {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Server{
 		ctx:            ctx,
 		cancel:         cancel,
 		peerManager:    pm,
-		port:           port,
+		config:         cfg,
+		port:           cfg.Server.Port,
 		fileSystem:     http.Dir(htmlDir),
 		connections:    make(map[*WSConnection]bool),
 		peerConnection: make(map[string]*WSConnection),
-		linger:         linger,
-		verbosity:      verbosity,
+		linger:         cfg.Behavior.Linger,
+		verbosity:      cfg.Behavior.Verbosity,
 	}
 
 	// Create protocol handler
@@ -161,18 +164,19 @@ func NewServerFromDir(ctx context.Context, pm *peer.Manager, htmlDir string, por
 // NewServerFromBundle creates a new HTTP server serving from a bundled ZIP archive
 // CRC: crc-Server.md
 // Sequence: seq-server-startup.md
-func NewServerFromBundle(ctx context.Context, pm *peer.Manager, bundleReader *zip.Reader, port int, linger bool, verbosity int) *Server {
+func NewServerFromBundle(ctx context.Context, pm *peer.Manager, cfg *config.Config, bundleReader *zip.Reader) *Server {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Server{
 		ctx:            ctx,
 		cancel:         cancel,
 		peerManager:    pm,
-		port:           port,
+		config:         cfg,
+		port:           cfg.Server.Port,
 		fileSystem:     &zipFileSystem{reader: bundleReader},
 		connections:    make(map[*WSConnection]bool),
 		peerConnection: make(map[string]*WSConnection),
-		linger:         linger,
-		verbosity:      verbosity,
+		linger:         cfg.Behavior.Linger,
+		verbosity:      cfg.Behavior.Verbosity,
 	}
 
 	// Create protocol handler
@@ -199,8 +203,8 @@ func NewServerFromBundle(ctx context.Context, pm *peer.Manager, bundleReader *zi
 // CRC: crc-Server.md
 // Sequence: seq-server-startup.md
 func (s *Server) Start() error {
-	// Determine starting port
-	startPort := s.port
+	// Determine starting port from config
+	startPort := s.config.Server.Port
 	if startPort == 0 {
 		startPort = 10000
 	}
@@ -219,7 +223,7 @@ func (s *Server) Start() error {
 	// Try to find an available port
 	var listener net.Listener
 	var err error
-	maxAttempts := 100
+	maxAttempts := s.config.Server.PortRange
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		port := startPort + attempt
@@ -235,7 +239,12 @@ func (s *Server) Start() error {
 	}
 
 	s.httpServer = &http.Server{
-		Handler: mux,
+		Handler:           mux,
+		ReadTimeout:       s.config.Server.Timeouts.Read.Duration,
+		WriteTimeout:      s.config.Server.Timeouts.Write.Duration,
+		IdleTimeout:       s.config.Server.Timeouts.Idle.Duration,
+		ReadHeaderTimeout: s.config.Server.Timeouts.ReadHeader.Duration,
+		MaxHeaderBytes:    s.config.Server.MaxHeaderBytes,
 	}
 
 	// Start server in goroutine with the listener
@@ -335,7 +344,7 @@ func (s *Server) Stop() error {
 	return shutdownErr
 }
 
-// startExitTimer starts a 5-second countdown to exit when no connections remain
+// startExitTimer starts a countdown to exit when no connections remain
 func (s *Server) startExitTimer() {
 	s.exitTimerMu.Lock()
 	defer s.exitTimerMu.Unlock()
@@ -345,10 +354,11 @@ func (s *Server) startExitTimer() {
 		s.exitTimer.Stop()
 	}
 
-	fmt.Println("Server closing in 5 seconds due to no active connections")
+	timeout := s.config.Behavior.AutoExitTimeout.Duration
+	fmt.Printf("Server closing in %v due to no active connections\n", timeout)
 
-	s.exitTimer = time.AfterFunc(5*time.Second, func() {
-		fmt.Println("Auto-exit: No connections for 5 seconds, shutting down...")
+	s.exitTimer = time.AfterFunc(timeout, func() {
+		fmt.Printf("Auto-exit: No connections for %v, shutting down...\n", timeout)
 		s.cancel() // Cancel context to trigger server shutdown
 	})
 }
@@ -423,6 +433,40 @@ func (s *Server) spaHandler(fs http.FileSystem) http.Handler {
 	fileServer := http.FileServer(fs)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Apply configured HTTP headers
+		if s.config.HTTP.CacheControl != "" {
+			w.Header().Set("Cache-Control", s.config.HTTP.CacheControl)
+			// Add Pragma and Expires headers for compatibility if no-cache is set
+			if strings.Contains(s.config.HTTP.CacheControl, "no-cache") {
+				w.Header().Set("Pragma", "no-cache")
+				w.Header().Set("Expires", "0")
+			}
+		}
+
+		// Apply security headers
+		if s.config.HTTP.Security.XContentTypeOptions != "" {
+			w.Header().Set("X-Content-Type-Options", s.config.HTTP.Security.XContentTypeOptions)
+		}
+		if s.config.HTTP.Security.XFrameOptions != "" {
+			w.Header().Set("X-Frame-Options", s.config.HTTP.Security.XFrameOptions)
+		}
+		if s.config.HTTP.Security.ContentSecurityPolicy != "" {
+			w.Header().Set("Content-Security-Policy", s.config.HTTP.Security.ContentSecurityPolicy)
+		}
+
+		// Apply CORS headers if enabled
+		if s.config.HTTP.CORS.Enabled {
+			if s.config.HTTP.CORS.AllowOrigin != "" {
+				w.Header().Set("Access-Control-Allow-Origin", s.config.HTTP.CORS.AllowOrigin)
+			}
+			if len(s.config.HTTP.CORS.AllowMethods) > 0 {
+				w.Header().Set("Access-Control-Allow-Methods", strings.Join(s.config.HTTP.CORS.AllowMethods, ", "))
+			}
+			if len(s.config.HTTP.CORS.AllowHeaders) > 0 {
+				w.Header().Set("Access-Control-Allow-Headers", strings.Join(s.config.HTTP.CORS.AllowHeaders, ", "))
+			}
+		}
+
 		path := r.URL.Path
 
 		// Try to open the file

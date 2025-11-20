@@ -28,7 +28,8 @@
 - listPeers: Get peers subscribed to topic
 - listFiles: Request file list from peer (returns promise, manages deduplication and handler pattern for async peerFiles server message)
 - getFile: Request IPFS content by CID (triggers gotFile server message with {success, content})
-- storeFile: Store file or directory with signature storeFile(path, content, directory) where content is null for directories, returns promise resolving to CID of stored node
+- storeFile: Store file with signature storeFile(path, content) where content is string or Uint8Array, returns promise resolving to CID of stored file node
+- createDirectory: Create directory with signature createDirectory(path), returns promise resolving to CID of stored directory node
 - removeFile: Remove file or directory from this peer's directory (implicit peerID)
 - sendRequest: Send JSON-RPC request and return Promise
 - handleResponse: Process response messages (resolve pending Promises)

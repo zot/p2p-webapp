@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zot/p2p-webapp/internal/bundle"
 	"github.com/zot/p2p-webapp/internal/commands"
+	"github.com/zot/p2p-webapp/internal/config"
 	"github.com/zot/p2p-webapp/internal/ipfs"
 	"github.com/zot/p2p-webapp/internal/peer"
 	"github.com/zot/p2p-webapp/internal/server"
@@ -72,11 +73,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	var srv *server.Server
 	var storagePath string
+	var cfg *config.Config
+	var err error
 
 	if dir != "" {
 		// Directory mode: serve from filesystem
 		if err := validateDirectoryStructure(dir); err != nil {
 			return err
+		}
+
+		// Load configuration from directory
+		cfg, err = config.LoadFromDir(dir)
+		if err != nil {
+			return fmt.Errorf("failed to load configuration: %w", err)
 		}
 
 		storagePath = filepath.Join(dir, "storage")
@@ -100,15 +109,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("Peer ID: %s\n", ipfsNode.PeerID())
 
+		// Merge command-line flags with configuration
+		cfg.Merge(port, noOpen, linger, verbose)
+
+		// Validate configuration
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("invalid configuration: %w", err)
+		}
+
 		// Create peer manager
-		peerManager, err := peer.NewManager(ctx, ipfsNode.Host(), ipfsNode.Peer(), verbose)
+		peerManager, err := peer.NewManager(ctx, ipfsNode.Host(), ipfsNode.Peer(), cfg.Behavior.Verbosity, cfg.P2P.FileUpdateNotifyTopic)
 		if err != nil {
 			return fmt.Errorf("failed to create peer manager: %w", err)
 		}
 
 		// Create HTTP server from directory
 		htmlDir := filepath.Join(dir, "html")
-		srv = server.NewServerFromDir(ctx, peerManager, htmlDir, port, linger, verbose)
+		srv = server.NewServerFromDir(ctx, peerManager, cfg, htmlDir)
 	} else {
 		// Bundle mode: serve from bundled site
 		bundleReader, err := bundle.GetBundleReader()
@@ -117,6 +134,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 		if bundleReader == nil {
 			return fmt.Errorf("binary is not bundled\nUse --dir to serve from a directory, or use a bundled binary")
+		}
+
+		// Load configuration from bundle
+		cfg, err = config.LoadFromZIP(bundleReader)
+		if err != nil {
+			return fmt.Errorf("failed to load configuration: %w", err)
+		}
+
+		// Merge command-line flags with configuration
+		cfg.Merge(port, noOpen, linger, verbose)
+
+		// Validate configuration
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("invalid configuration: %w", err)
 		}
 
 		// Create temporary storage directory in current directory
@@ -145,13 +176,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Peer ID: %s\n", ipfsNode.PeerID())
 
 		// Create peer manager
-		peerManager, err := peer.NewManager(ctx, ipfsNode.Host(), ipfsNode.Peer(), verbose)
+		peerManager, err := peer.NewManager(ctx, ipfsNode.Host(), ipfsNode.Peer(), cfg.Behavior.Verbosity, cfg.P2P.FileUpdateNotifyTopic)
 		if err != nil {
 			return fmt.Errorf("failed to create peer manager: %w", err)
 		}
 
 		// Create HTTP server from bundle
-		srv = server.NewServerFromBundle(ctx, peerManager, bundleReader, port, linger, verbose)
+		srv = server.NewServerFromBundle(ctx, peerManager, cfg, bundleReader)
 	}
 
 	// Start server
@@ -167,8 +198,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// Open browser unless --noopen flag is set
-	if !noOpen {
+	// Open browser unless configured not to
+	if cfg.Behavior.AutoOpenBrowser {
 		if err := srv.OpenBrowser(); err != nil {
 			fmt.Printf("Failed to open browser: %v\n", err)
 			fmt.Printf("Please open http://localhost:%d manually\n", srv.Port())

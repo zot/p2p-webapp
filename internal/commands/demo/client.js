@@ -174,23 +174,41 @@ export class P2PWebAppClient {
         return promise;
     }
     /**
-     * Store file or directory for this peer
+     * Store file for this peer
      * @param path File path identifier
-     * @param content File content as Uint8Array (null for directories)
-     * @param directory true = create directory, false = create file
-     * @returns Promise resolving to CID of the stored file/directory node
+     * @param content File content as string or Uint8Array
+     * @returns Promise resolving to CID of the stored file node
      */
-    async storeFile(path, content, directory) {
+    async storeFile(path, content) {
         let base64Content;
-        if (!directory && content) {
-            // Encode Uint8Array to base64 for files
+        if (typeof content === 'string') {
+            // Convert string to UTF-8 bytes then to base64
+            const encoder = new TextEncoder();
+            const bytes = encoder.encode(content);
+            let binaryString = '';
+            for (let i = 0; i < bytes.length; i++) {
+                binaryString += String.fromCharCode(bytes[i]);
+            }
+            base64Content = btoa(binaryString);
+        }
+        else {
+            // Encode Uint8Array to base64 for binary files
             let binaryString = '';
             for (let i = 0; i < content.length; i++) {
                 binaryString += String.fromCharCode(content[i]);
             }
             base64Content = btoa(binaryString);
         }
-        const result = await this.sendRequest('storefile', { path, content: base64Content, directory });
+        const result = await this.sendRequest('storefile', { path, content: base64Content, directory: false });
+        return result.cid;
+    }
+    /**
+     * Create directory for this peer
+     * @param path Directory path identifier
+     * @returns Promise resolving to CID of the stored directory node
+     */
+    async createDirectory(path) {
+        const result = await this.sendRequest('storefile', { path, content: undefined, directory: true });
         return result.cid;
     }
     /**

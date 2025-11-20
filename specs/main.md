@@ -49,6 +49,75 @@ For peers behind NATs/firewalls (typical for home networks):
 - **AutoRelay**: automatically finds and uses public relay nodes from the IPFS network
 - **NAT Port Mapping**: attempts UPnP/NAT-PMP for automatic port forwarding
 
+# Configuration
+p2p-webapp supports optional configuration via a `p2p-webapp.toml` file placed at the site root (same level as html/, ipfs/, storage/ directories).
+
+## Configuration File Location
+- **Directory mode (--dir)**: Place `p2p-webapp.toml` in the base directory
+- **Bundle mode**: Include `p2p-webapp.toml` in the root before bundling
+
+## Configuration Precedence
+1. Command-line flags (highest priority)
+2. Configuration file (`p2p-webapp.toml`)
+3. Default values (lowest priority)
+
+## Configuration Options
+
+### [server]
+- `port`: Starting port number (default: 10000)
+- `portRange`: Number of ports to try if starting port unavailable (default: 100)
+- `maxHeaderBytes`: Maximum size of request headers in bytes (default: 1048576 = 1MB)
+
+### [server.timeouts]
+- `read`: Maximum duration for reading entire request (default: "15s")
+- `write`: Maximum duration for writing response (default: "15s")
+- `idle`: Maximum duration to wait for next request (default: "60s")
+- `readHeader`: Maximum duration for reading request headers (default: "5s")
+
+### [http]
+- `cacheControl`: Cache-Control header for all files (default: "no-cache, no-store, must-revalidate")
+  - Development: `"no-cache, no-store, must-revalidate"` (prevents caching)
+  - Production: `"public, max-age=3600, immutable"` (enables caching)
+
+### [http.security]
+- `xContentTypeOptions`: X-Content-Type-Options header (default: "nosniff")
+- `xFrameOptions`: X-Frame-Options header (default: "DENY")
+- `contentSecurityPolicy`: Content-Security-Policy header (default: "" = not set)
+
+### [http.cors]
+- `enabled`: Enable CORS headers (default: false)
+- `allowOrigin`: Access-Control-Allow-Origin header (default: "")
+- `allowMethods`: Access-Control-Allow-Methods header (default: [])
+- `allowHeaders`: Access-Control-Allow-Headers header (default: [])
+
+### [websocket]
+- `checkOrigin`: Validate WebSocket origin (default: false = allow all)
+- `allowedOrigins`: List of allowed origins (requires checkOrigin = true)
+- `readBufferSize`: WebSocket read buffer in bytes (default: 1024)
+- `writeBufferSize`: WebSocket write buffer in bytes (default: 1024)
+
+### [behavior]
+- `autoExitTimeout`: Auto-exit timeout when no connections remain (default: "5s")
+- `autoOpenBrowser`: Automatically open browser on startup (default: true)
+- `linger`: Keep server running after all connections close (default: false)
+- `verbosity`: Verbosity level 0-3 (default: 0)
+
+### [files]
+- `indexFile`: File to serve for SPA routes (default: "index.html")
+- `spaFallback`: Enable SPA routing fallback (default: true)
+
+### [p2p]
+- `protocolName`: Reserved libp2p protocol name for file list queries (default: "/p2p-webapp/1.0.0")
+- `fileUpdateNotifyTopic`: Optional topic for file availability notifications (default: "" = disabled)
+  - When configured and peer is subscribed to the topic, file changes trigger notifications
+  - Message format: `{"type":"p2p-webapp-file-update","peer":"<peerID>"}`
+  - Applications can use this to automatically refresh file lists when peers update their files
+  - Privacy-friendly: only publishes when explicitly subscribed to the topic
+
+## Example Configuration
+
+See `p2p-webapp.example.toml` for a fully documented example configuration file.
+
 # Commands
 - **Default behavior (no subcommand)**
   - running `./p2p-webapp` without a subcommand starts the server
@@ -137,7 +206,7 @@ For peers behind NATs/firewalls (typical for home networks):
           - Uses `listFiles(peerid): Promise<{rootCID, entries}>` to fetch directory tree
           - Converts flat pathname entries to hierarchical tree structure
           - Stores expanded/collapsed state per directory
-          - Uses `storeFile(path, content, directory)` for uploads and directory creation
+          - Uses `storeFile(path, content)` for file uploads and `createDirectory(path)` for directory creation
           - Uses `getFile(cid): Promise<FileContent>` for downloads
           - Modal overlay with close button to return to chat
 - **bundle**
@@ -376,14 +445,30 @@ Example entries object:
 - Internally sends a server message `gotFile(cid, {success: bool, content})` which the client library uses to resolve/reject the promise
 ### Response: null or error (promise resolution handled by client library)
 
-## storeFile(path: string, content: string | null, directory: bool)
-Make a file or directory node (as indicated) and store it in ipfs-lite, which will return the new node. Content will be null for a directory, if directory is false, it is an error for content to be null.
+## storeFile(path: string, content: string | Uint8Array)
+Make a file node and store it in ipfs-lite, which will return the new node.
+Content can be either a string (which will be UTF-8 encoded) or binary data as Uint8Array.
 Use path to find the correct subdirectory in the peer's directory and add the new node there.
 Update the peer's CID after the change.
-### Response: CID string of the stored file/directory node, or error
+
+**File Availability Notifications**: If `fileUpdateNotifyTopic` is configured in settings and the peer is subscribed to that topic, the server publishes a notification message after successfully storing the file. This allows other peers to be notified of file changes and refresh their file lists automatically.
+
+### Response: CID string of the stored file node, or error
+
+## createDirectory(path: string)
+Make a directory node and store it in ipfs-lite, which will return the new node.
+Use path to find the correct subdirectory in the peer's directory and add the new node there.
+Update the peer's CID after the change.
+
+**File Availability Notifications**: If `fileUpdateNotifyTopic` is configured in settings and the peer is subscribed to that topic, the server publishes a notification message after successfully creating the directory. This allows other peers to be notified of directory changes and refresh their file lists automatically.
+
+### Response: CID string of the stored directory node, or error
 
 ## removeFile(path: string)
 Use path to find the correct directory and remove the element from it.
+
+**File Availability Notifications**: If `fileUpdateNotifyTopic` is configured in settings and the peer is subscribed to that topic, the server publishes a notification message after successfully removing the file. This allows other peers to be notified of file changes and refresh their file lists automatically.
+
 ### Response: null or error
 
 # Server Request messages
@@ -497,6 +582,10 @@ The server implements automatic SPA (Single Page Application) routing fallback:
 - **Fallback behavior**: Non-existent routes serve `index.html` while preserving the URL
 - **File serving**: Real files (with extensions) are served normally
 - **404 handling**: Missing files with extensions return proper 404 errors
+- **Cache prevention**: All files served with `Cache-Control: no-cache, no-store` headers to prevent browser caching
+  - Ensures fresh content after code changes without manual cache clearing
+  - Browser revalidates with server on every request
+  - No need to clear browser cache during development
 - **Implementation**: `internal/server/server.go:spaHandler()`
 
 Examples:
@@ -505,3 +594,52 @@ Examples:
 - `/adventure/world/123` → serves `html/index.html` (URL stays `/adventure/world/123`)
 - `/main.js` → serves `html/main.js` (actual file)
 - `/nonexistent.js` → returns 404 (file with extension not found)
+
+## Demo Application
+
+The bundled demo (`internal/commands/demo/index.html`) demonstrates the TypeScript client library and includes a P2P chatroom with file sharing capabilities.
+
+### Connection Lifecycle
+
+The demo displays a connection status indicator that accurately reflects the peer's connection state:
+
+**Connection States:**
+1. **"Connecting to server..."** (initial state)
+   - Displayed while WebSocket connection is being established
+
+2. **"Connecting to network..."** (with spinning indicator)
+   - WebSocket is connected and peer identity is established
+   - Protocol handlers are being registered
+   - **Pubsub subscription is in progress** - joining the gossipsub topic
+   - Indicator shows spinning animation (⟳) to indicate ongoing connection
+
+3. **"Connected"** (final state)
+   - All connection phases complete:
+     - WebSocket connected ✓
+     - Peer identity created ✓
+     - Protocol handlers started ✓
+     - **Pubsub topic joined** ✓
+   - **Peer is now a member of the pubsub group** and can send/receive group messages
+   - Ready for peer-to-peer messaging and file operations
+
+**Implementation Details:**
+- The `subscribe()` call blocks until the peer successfully joins the gossipsub topic on the server
+- Server waits for `pubsub.Join(topic)` and `topic.Subscribe()` to complete before responding
+- "Connected" status is only shown **after** `subscribe()` resolves, ensuring pubsub group membership
+- This guarantees that when "Connected" is displayed, the peer is fully ready for all P2P operations
+
+**Status Transitions:**
+```javascript
+// WebSocket connection
+client = await connect();
+setStatus('Connecting to network...', 'connecting');  // Show spinning
+
+// Protocol registration
+await client.start(PROTOCOL, onData);
+
+// Pubsub subscription - BLOCKS until peer joins group
+await client.subscribe(ROOM_TOPIC, onMessage, onPeerChange);
+
+// Now fully connected to pubsub group
+setStatus('Connected', 'connected');  // Stop spinning, show connected
+```

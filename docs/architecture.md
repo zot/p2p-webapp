@@ -201,7 +201,8 @@ Browser ← WebSocket ← WebSocketHandler ← PeerManager
 **File Operations**:
 - `listFiles(peerID)` - List files in peer's directory (local or remote)
 - `getFile(cid)` - Retrieve content by CID from IPFS network
-- `storeFile(path, content, directory)` - Add files/directories to peer's tree, returns CID of stored node
+- `storeFile(path, content)` - Add file to peer's tree (content: string or Uint8Array), returns CID of stored file node
+- `createDirectory(path)` - Add directory to peer's tree, returns CID of stored directory node
 - `removeFile(path)` - Remove entries from peer's directory
 - Reserved `p2p-webapp` protocol for peer-to-peer file list requests
 

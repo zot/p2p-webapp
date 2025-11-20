@@ -85,18 +85,19 @@ type FileListMessage struct {
 // Manager manages multiple peers
 // CRC: crc-PeerManager.md
 type Manager struct {
-	ctx          context.Context
-	mu           sync.RWMutex
-	peers        map[string]*Peer
-	onPeerData   func(receiverPeerID, senderPeerID, protocol string, data any)
-	onTopicData  func(receiverPeerID, topic, senderPeerID string, data any)
-	onPeerChange func(receiverPeerID, topic, changedPeerID string, joined bool)
-	onPeerFiles  func(receiverPeerID, targetPeerID, dirCID string, entries map[string]any)
-	onGotFile    func(receiverPeerID string, cid string, success bool, content any)
-	peerAliases  map[string]string // peerID -> alias
-	aliasCounter int
-	verbosity    int
-	ipfsPeer     *ipfslite.Peer // IPFS peer for file storage
+	ctx                   context.Context
+	mu                    sync.RWMutex
+	peers                 map[string]*Peer
+	onPeerData            func(receiverPeerID, senderPeerID, protocol string, data any)
+	onTopicData           func(receiverPeerID, topic, senderPeerID string, data any)
+	onPeerChange          func(receiverPeerID, topic, changedPeerID string, joined bool)
+	onPeerFiles           func(receiverPeerID, targetPeerID, dirCID string, entries map[string]any)
+	onGotFile             func(receiverPeerID string, cid string, success bool, content any)
+	peerAliases           map[string]string // peerID -> alias
+	aliasCounter          int
+	verbosity             int
+	ipfsPeer              *ipfslite.Peer // IPFS peer for file storage
+	fileUpdateNotifyTopic string         // Optional topic for file update notifications
 }
 
 // Peer represents a single libp2p peer with its own host and state
@@ -156,13 +157,14 @@ func (n *discoveryNotifee) HandlePeerFound(pi peer.AddrInfo) {
 // NewManager creates a new peer manager
 // CRC: crc-PeerManager.md
 // Sequence: seq-server-startup.md
-func NewManager(ctx context.Context, bootstrapHost host.Host, ipfsPeer *ipfslite.Peer, verbosity int) (*Manager, error) {
+func NewManager(ctx context.Context, bootstrapHost host.Host, ipfsPeer *ipfslite.Peer, verbosity int, fileUpdateNotifyTopic string) (*Manager, error) {
 	return &Manager{
-		ctx:         ctx,
-		peers:       make(map[string]*Peer),
-		peerAliases: make(map[string]string),
-		verbosity:   verbosity,
-		ipfsPeer:    ipfsPeer,
+		ctx:                   ctx,
+		peers:                 make(map[string]*Peer),
+		peerAliases:           make(map[string]string),
+		verbosity:             verbosity,
+		ipfsPeer:              ipfsPeer,
+		fileUpdateNotifyTopic: fileUpdateNotifyTopic,
 	}, nil
 }
 
@@ -1501,6 +1503,9 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) (strin
 	}
 	p.logVerbose(2, "Stored %s: %s -> %s", typeStr, filepath, newNode.Cid().String())
 
+	// Publish file update notification if configured and subscribed
+	p.publishFileUpdateNotification()
+
 	return newNode.Cid().String(), nil
 }
 
@@ -1576,10 +1581,35 @@ func (p *Peer) RemoveFile(filepath string) error {
 
 	p.logVerbose(2, "Removed file/directory: %s", filepath)
 
+	// Publish file update notification if configured and subscribed
+	p.publishFileUpdateNotification()
+
 	return nil
 }
 
 // Internal methods
+
+// publishFileUpdateNotification publishes a file update notification if configured and subscribed
+func (p *Peer) publishFileUpdateNotification() {
+	// Check if notification topic is configured
+	if p.manager.fileUpdateNotifyTopic == "" {
+		return
+	}
+
+	// Check if peer is subscribed to the notification topic
+	if _, subscribed := p.topics[p.manager.fileUpdateNotifyTopic]; !subscribed {
+		return
+	}
+
+	// Publish notification message
+	msg := map[string]string{
+		"type": "p2p-webapp-file-update",
+		"peer": p.peerID.String(),
+	}
+
+	// Ignore publish errors (best effort notification)
+	_ = p.Publish(p.manager.fileUpdateNotifyTopic, msg)
+}
 
 func (p *Peer) handleIncomingStream(s network.Stream) {
 	// Route incoming stream to virtual connection manager for reliable handling

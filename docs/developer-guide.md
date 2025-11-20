@@ -11,10 +11,11 @@
 3. [Building](#building)
 4. [Testing](#testing)
 5. [Development Workflow](#development-workflow)
-6. [Design Methodology](#design-methodology)
-7. [Contributing](#contributing)
-8. [Debugging](#debugging)
-9. [Best Practices](#best-practices)
+6. [Configuration](#configuration)
+7. [Design Methodology](#design-methodology)
+8. [Contributing](#contributing)
+9. [Debugging](#debugging)
+10. [Best Practices](#best-practices)
 
 ---
 
@@ -381,6 +382,116 @@ curl http://localhost:10000/
 
 ---
 
+## Configuration
+
+### Configuration File
+
+p2p-webapp supports optional configuration via `p2p-webapp.toml` file:
+
+**Location**:
+- **Directory mode**: Place in base directory (same level as html/, ipfs/, storage/)
+- **Bundle mode**: Include in root before bundling
+
+**Precedence**: Command-line flags → Config file → Defaults
+
+### File Update Notifications
+
+<!-- Spec: main.md (FR15: File Update Notifications) -->
+
+**Purpose**: Automatically notify subscribed peers when files change
+
+**Configuration** (`p2p-webapp.toml`):
+```toml
+[p2p]
+# Optional topic for file availability notifications
+# Disabled by default (empty string = disabled)
+fileUpdateNotifyTopic = "chatroom"
+```
+
+**Behavior**:
+- When configured and peer subscribed to topic: publishes notification after `storeFile()` / `removeFile()`
+- Message format: `{"type":"p2p-webapp-file-update","peer":"<peerID>"}`
+- Privacy-friendly: only publishes if BOTH conditions met:
+  1. `fileUpdateNotifyTopic` is set in config
+  2. Peer is subscribed to that topic
+
+**Use Cases**:
+- **Automatic file list refresh**: When viewing a peer's files, refresh list when they update
+- **Collaboration awareness**: Notify team members of file changes
+- **Sync triggers**: Use as signal to synchronize content
+
+**Demo Example**:
+
+The bundled demo uses this feature for automatic file list updates:
+
+```javascript
+// Subscribe to room topic (doubles as file notification topic)
+await client.subscribe(ROOM_TOPIC, (senderPeerID, data) => {
+    // Check for file update notification
+    if (data.type === 'p2p-webapp-file-update' && data.peer) {
+        // If viewing this peer's files, refresh the list
+        if (currentFilePeerID === data.peer && currentTab === 'files') {
+            client.listFiles(data.peer).catch(err => {
+                console.error('Error refreshing file list:', err);
+            });
+        }
+        return; // Don't process as chat message
+    }
+
+    // Handle normal chat message...
+});
+```
+
+**Implementation Notes**:
+- Notification published in `publishFileUpdateNotification()` method (internal/peer/manager.go)
+- Called after successful file storage/removal
+- No error if publish fails (non-critical operation)
+- Applications can use separate topics for chat and notifications if desired
+
+**Configuration in Code**:
+
+When creating PeerManager:
+```go
+// internal/server/server.go
+fileUpdateNotifyTopic := settings.P2P.FileUpdateNotifyTopic
+manager, err := peer.NewManager(ctx, bootstrapHost, ipfsPeer,
+    verbosity, fileUpdateNotifyTopic)
+```
+
+### Other Configuration Options
+
+See `p2p-webapp.example.toml` for complete configuration reference:
+
+- **[server]**: Port, port range, header size, timeouts
+- **[http]**: Cache control, security headers, CORS
+- **[websocket]**: Origin validation, buffer sizes
+- **[behavior]**: Auto-exit, auto-open browser, linger, verbosity
+- **[files]**: Index file, SPA fallback
+- **[p2p]**: Protocol name, file update notifications
+
+**Example Configurations**:
+
+Development (disable caching):
+```toml
+[http]
+cacheControl = "no-cache, no-store, must-revalidate"
+
+[behavior]
+verbosity = 2  # Show WebSocket details
+```
+
+Production (enable caching):
+```toml
+[http]
+cacheControl = "public, max-age=3600, immutable"
+
+[behavior]
+verbosity = 0  # Minimal output
+autoOpenBrowser = false
+```
+
+---
+
 ## Design Methodology
 
 ### CRC Methodology (3-Level Spec-Driven Development)
@@ -711,6 +822,8 @@ cat /tmp/.p2p-webapp
 
 ## References
 
+- **Requirements**: `docs/requirements.md`
+- **Design**: `docs/design.md`
 - **Architecture**: `docs/architecture.md`
 - **API Reference**: `docs/api-reference.md`
 - **Design Documents**: `design/` directory

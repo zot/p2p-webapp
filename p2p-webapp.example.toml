@@ -1,0 +1,91 @@
+# p2p-webapp Configuration File
+#
+# This file should be named 'p2p-webapp.toml' and placed at the site root
+# (same level as html/, ipfs/, storage/ directories).
+#
+# For bundled mode: place this file in the root before bundling
+# For --dir mode: place this file in the directory you're serving
+#
+# All settings shown here are optional. If omitted, defaults are used.
+# Command-line flags take precedence over config file values.
+
+[server]
+# Starting port number (default: 10000)
+port = 10000
+
+# Number of ports to try if starting port is unavailable (default: 100)
+portRange = 100
+
+# Maximum size of request headers in bytes (default: 1048576 = 1MB)
+maxHeaderBytes = 1048576
+
+[server.timeouts]
+# HTTP server timeouts (default: all 15s except idle which is 60s)
+read = "15s"        # Maximum duration for reading entire request
+write = "15s"       # Maximum duration for writing response
+idle = "60s"        # Maximum duration to wait for next request
+readHeader = "5s"   # Maximum duration for reading request headers
+
+[http]
+# Cache-Control header for all files (default: no-cache, no-store, must-revalidate)
+# Development: "no-cache, no-store, must-revalidate" (current default)
+# Production: "public, max-age=3600, immutable" (cache for 1 hour)
+cacheControl = "no-cache, no-store, must-revalidate"
+
+[http.security]
+# Security headers (defaults shown)
+xContentTypeOptions = "nosniff"  # Prevent MIME-sniffing
+xFrameOptions = "DENY"           # Prevent clickjacking
+contentSecurityPolicy = ""       # Content Security Policy (empty = not set)
+
+[http.cors]
+# Cross-Origin Resource Sharing (default: disabled)
+enabled = false
+allowOrigin = "*"
+allowMethods = ["GET", "POST"]
+allowHeaders = ["Content-Type"]
+
+[websocket]
+# WebSocket settings
+checkOrigin = false              # Validate WebSocket origin (default: false = allow all)
+allowedOrigins = []              # List of allowed origins (requires checkOrigin = true)
+readBufferSize = 1024            # WebSocket read buffer in bytes
+writeBufferSize = 1024           # WebSocket write buffer in bytes
+
+[behavior]
+# Auto-exit timeout when no WebSocket connections remain (default: 5s)
+# Set to longer duration if you frequently reload pages
+autoExitTimeout = "5s"
+
+# Automatically open browser on startup (default: true)
+# Set to false if you prefer to open browser manually
+autoOpenBrowser = true
+
+# Keep server running after all connections close (default: false)
+# Set to true to disable auto-exit feature entirely
+linger = false
+
+# Verbosity level 0-3 (default: 0)
+# 0 = normal output
+# 1 = peer creation, connections, messages
+# 2 = WebSocket message send/receive with request IDs
+# 3 = additional debug information
+verbosity = 0
+
+[files]
+# File serving settings
+indexFile = "index.html"  # File to serve for SPA routes (default: index.html)
+spaFallback = true        # Enable SPA routing fallback (default: true)
+
+[p2p]
+# P2P protocol settings
+protocolName = "/p2p-webapp/1.0.0"  # Reserved libp2p protocol name for file list queries
+
+# Optional: Enable file availability notifications
+# When a peer's files change, publish a notification to this topic
+# Only publishes if the peer is subscribed to this topic
+# Disabled by default (empty = disabled)
+# The demo uses "chatroom" as the file update notification topic
+fileUpdateNotifyTopic = "chatroom"
+
+# Message format: {"type":"p2p-webapp-file-update","peer":"<peerID>"}
