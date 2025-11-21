@@ -8,6 +8,31 @@
 - Create comprehensive **unit tests** for all components
 - code and specs are as MINIMAL as POSSIBLE
 
+## 🔒 Synchronization Hygiene (Go Concurrency)
+
+**CRITICAL**: Follow these principles for ALL mutex/lock usage to prevent deadlocks and race conditions.
+
+### 1. Centralize Locking Around Resources
+- **Only the object that owns a resource should lock/unlock it**
+- Never hold a lock while calling methods on other objects
+- Methods should NOT leave resources locked when they exit
+  - Exception: Component lock systems (like `pidfile_unix.go` used by `pidfile.go`)
+
+### 2. Minimize Lock Duration
+- **Lock → Extract Data → Unlock → Process**
+- For queues: lock → dequeue → unlock → process (NOT: lock → dequeue → process → unlock)
+- Never hold locks during:
+  - I/O operations (file, network, database)
+  - External method calls
+  - Blocking operations (channels, sleeps, waits)
+
+### 3. Avoid `withResource` Patterns
+- Methods like `withResource(func(...))` maximize lock time
+- Only use when unavoidable (since methods can't leave locks held)
+- Prefer: lock → copy data → unlock → work with copy
+
+**For detailed patterns, examples, and anti-patterns, see the Synchronization Hygiene section in `docs/developer-guide.md`.**
+
 ## CRC Modeling Workflow
 
 **DO NOT generate code directly from `specs/*.md` files!**
@@ -137,9 +162,14 @@ When testing with Playwright MCP:
 The build process:
 1. Checks and installs TypeScript dependencies if `node_modules` is missing
 2. Compiles the TypeScript client library (`pkg/client/src/`) to ES modules
-3. Copies the compiled library to `internal/commands/demo/` for bundling
+3. Copies the compiled library to `internal/commands/demo/html/` for bundling
 4. Builds a temporary Go binary
-5. Bundles the demo site (from `internal/commands/demo/`) into the final binary using ZIP append
-6. The final binary always ships with the demo bundled and ready to extract
-7. Users can extract the demo with the `extract` command and get the client library files
-8. The `ls` and `cp` commands operate directly on the bundled content (no go:embed needed)
+5. Prepares the demo site with proper directory structure:
+   - `html/` - Contains the compiled demo files (index.html, *.js, *.d.ts)
+   - `config/` - Contains p2p-webapp.toml configuration file
+   - `ipfs/` - Optional IPFS content directory
+   - `storage/` - Storage directory for peer data
+6. Bundles the demo site into the final binary using ZIP append
+7. The final binary always ships with the demo bundled and ready to extract
+8. Users can extract the demo with the `extract` command to get the full directory structure
+9. The `ls`, `cat`, and `cp` commands operate directly on the bundled content from html/ and config/ directories

@@ -6,6 +6,7 @@ import {
   ListPeersResponse,
   FileEntry,
   FileContent,
+  StoreFileResponse,
   ProtocolDataCallback,
   TopicDataCallback,
   PeerChangeCallback,
@@ -237,9 +238,9 @@ export class P2PWebAppClient {
    * Store file for this peer
    * @param path File path identifier
    * @param content File content as string or Uint8Array
-   * @returns Promise resolving to CID of the stored file node
+   * @returns Promise resolving to StoreFileResponse with fileCid and rootCid
    */
-  async storeFile(path: string, content: string | Uint8Array): Promise<string> {
+  async storeFile(path: string, content: string | Uint8Array): Promise<StoreFileResponse> {
     let base64Content: string;
 
     if (typeof content === 'string') {
@@ -261,17 +262,17 @@ export class P2PWebAppClient {
     }
 
     const result = await this.sendRequest('storefile', { path, content: base64Content, directory: false });
-    return result.cid;
+    return { fileCid: result.fileCid, rootCid: result.rootCid };
   }
 
   /**
    * Create directory for this peer
    * @param path Directory path identifier
-   * @returns Promise resolving to CID of the stored directory node
+   * @returns Promise resolving to StoreFileResponse with fileCid and rootCid
    */
-  async createDirectory(path: string): Promise<string> {
+  async createDirectory(path: string): Promise<StoreFileResponse> {
     const result = await this.sendRequest('storefile', { path, content: undefined, directory: true });
-    return result.cid;
+    return { fileCid: result.fileCid, rootCid: result.rootCid };
   }
 
   /**

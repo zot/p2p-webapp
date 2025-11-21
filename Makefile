@@ -17,12 +17,12 @@ client: deps
 	@echo "Building TypeScript client library..."
 	cd pkg/client && npm run build
 	@echo "Copying client library to demo directory..."
-	mkdir -p internal/commands/demo
-	cp pkg/client/dist/*.js internal/commands/demo/
-	cp pkg/client/dist/*.d.ts internal/commands/demo/
+	mkdir -p internal/commands/demo/html
+	cp pkg/client/dist/*.js internal/commands/demo/html/
+	cp pkg/client/dist/*.d.ts internal/commands/demo/html/
 	@echo "Cleaning temporary files from demo directory..."
-	find internal/commands/demo -name '.*' -type f -delete
-	find internal/commands/demo -name '#*' -type f -delete
+	find internal/commands/demo/html -name '.*' -type f -delete
+	find internal/commands/demo/html -name '#*' -type f -delete
 	@echo "Client library built and copied successfully"
 
 # Build Go application for current platform (depends on client)

@@ -68,6 +68,10 @@ export interface StoreFileRequest {
 export interface RemoveFileRequest {
     path: string;
 }
+export interface StoreFileResponse {
+    fileCid: string;
+    rootCid: string;
+}
 export interface PeerDataRequest {
     peer: string;
     protocol: string;

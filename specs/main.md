@@ -116,7 +116,7 @@ p2p-webapp supports optional configuration via a `p2p-webapp.toml` file placed a
 
 ## Example Configuration
 
-See `p2p-webapp.example.toml` for a fully documented example configuration file.
+See `docs/examples/p2p-webapp.toml` for a fully documented example configuration file.
 
 # Commands
 - **Default behavior (no subcommand)**
@@ -453,7 +453,8 @@ Update the peer's CID after the change.
 
 **File Availability Notifications**: If `fileUpdateNotifyTopic` is configured in settings and the peer is subscribed to that topic, the server publishes a notification message after successfully storing the file. This allows other peers to be notified of file changes and refresh their file lists automatically.
 
-### Response: CID string of the stored file node, or error
+### Response: StoreFileResponse {fileCid: string, rootCid: string} or error
+Returns both the CID of the stored file node and the updated root directory CID. The root CID is useful for persisting the peer's directory state across sessions.
 
 ## createDirectory(path: string)
 Make a directory node and store it in ipfs-lite, which will return the new node.
@@ -462,7 +463,8 @@ Update the peer's CID after the change.
 
 **File Availability Notifications**: If `fileUpdateNotifyTopic` is configured in settings and the peer is subscribed to that topic, the server publishes a notification message after successfully creating the directory. This allows other peers to be notified of directory changes and refresh their file lists automatically.
 
-### Response: CID string of the stored directory node, or error
+### Response: StoreFileResponse {fileCid: string, rootCid: string} or error
+Returns both the CID of the stored directory node and the updated root directory CID. The root CID is useful for persisting the peer's directory state across sessions.
 
 ## removeFile(path: string)
 Use path to find the correct directory and remove the element from it.
@@ -623,10 +625,16 @@ The demo displays a connection status indicator that accurately reflects the pee
    - Ready for peer-to-peer messaging and file operations
 
 **Implementation Details:**
-- The `subscribe()` call blocks until the peer successfully joins the gossipsub topic on the server
-- Server waits for `pubsub.Join(topic)` and `topic.Subscribe()` to complete before responding
-- "Connected" status is only shown **after** `subscribe()` resolves, ensuring pubsub group membership
-- This guarantees that when "Connected" is displayed, the peer is fully ready for all P2P operations
+- The `subscribe()` call blocks until the peer is fully ready for communication
+- Server performs these steps:
+  1. Joins the gossipsub topic via `pubsub.Join(topic)`
+  2. Subscribes to topic messages via `topic.Subscribe()`
+  3. **Waits for gossip mesh formation** (up to 2 seconds)
+     - GossipSub requires time for the mesh overlay to form between peers
+     - Initial heartbeat occurs at 50ms, then every 500ms
+     - Subscribe() waits until at least one peer appears in the mesh or timeout occurs
+- "Connected" status is only shown **after** `subscribe()` resolves, ensuring mesh is ready
+- This guarantees that when "Connected" is displayed, the peer can immediately send/receive messages
 
 **Status Transitions:**
 ```javascript

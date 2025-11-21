@@ -203,18 +203,19 @@ try {
 ### File Operations (IPFS)
 
 ```typescript
-// Store a text file (string content)
-const textCid = await client.storeFile('readme.txt', 'Hello, world!');
+// Store a text file (string content) - returns { fileCid, rootCid }
+const { fileCid: textCid, rootCid: textRootCid } = await client.storeFile('readme.txt', 'Hello, world!');
 console.log('Stored text file with CID:', textCid);
+console.log('Updated root CID:', textRootCid); // Can be persisted for session restore
 
 // Store a binary file (Uint8Array content)
 const binaryContent = new Uint8Array([0x89, 0x50, 0x4E, 0x47]); // PNG header
-const binaryCid = await client.storeFile('image.png', binaryContent);
+const { fileCid: binaryCid, rootCid } = await client.storeFile('image.png', binaryContent);
 console.log('Stored binary file with CID:', binaryCid);
 
-// Create a directory (returns CID of directory node)
-const dirCid = await client.createDirectory('docs');
-const nestedFileCid = await client.storeFile('docs/file1.txt', 'File content');
+// Create a directory (returns { fileCid, rootCid })
+const { fileCid: dirCid, rootCid: dirRootCid } = await client.createDirectory('docs');
+const { fileCid: nestedFileCid } = await client.storeFile('docs/file1.txt', 'File content');
 
 // List files from any peer (local or remote)
 const { rootCID, entries } = await client.listFiles(peerID);
@@ -393,10 +394,10 @@ let currentViewingPeer = null;
 async function uploadFile(file: File) {
   const arrayBuffer = await file.arrayBuffer();
   const content = new Uint8Array(arrayBuffer);
-  const cid = await client.storeFile(file.name, content);
-  console.log(`Uploaded ${file.name} with CID: ${cid}`);
+  const { fileCid, rootCid } = await client.storeFile(file.name, content);
+  console.log(`Uploaded ${file.name} with CID: ${fileCid}`);
   // Automatically notifies other peers if topic is configured!
-  return cid;
+  return { fileCid, rootCid }; // Return both CIDs; rootCid can be persisted
 }
 
 // Subscribe to file-sharing topic with automatic refresh
@@ -743,7 +744,7 @@ protocolName = "/p2p-webapp/1.0.0"  # Reserved libp2p protocol for file list que
 fileUpdateNotifyTopic = ""          # Optional topic for file update notifications (default: disabled)
 ```
 
-See `p2p-webapp.example.toml` for a fully commented example configuration.
+See `docs/examples/p2p-webapp.toml` for a fully commented example configuration.
 
 ### Priority
 
@@ -875,8 +876,8 @@ A: This depends on network conditions and the IPFS/libp2p configuration. Small t
 | `stop(protocol)`                          | Stop listening for direct messages                                            |
 | `listFiles(peerID)`                       | List files for a peer (returns {rootCID, entries})                            |
 | `getFile(cid)`                            | Get file or directory content by CID                                          |
-| `storeFile(path, content)`*               | Store file (content as string or Uint8Array), returns CID of stored file node |
-| `createDirectory(path)`*                  | Create directory, returns CID of stored directory node                        |
+| `storeFile(path, content)`*               | Store file (content as string or Uint8Array), returns {fileCid, rootCid}      |
+| `createDirectory(path)`*                  | Create directory, returns {fileCid, rootCid}                                   |
 | `removeFile(path)`*                       | Remove a file from this peer's storage                                        |
 | `close()`                                 | Disconnect                                                                    |
 

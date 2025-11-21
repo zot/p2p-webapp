@@ -1,0 +1,10 @@
+# p2p-webapp Demo Configuration
+#
+# This configuration file is bundled with the demo to enable
+# file availability notifications on the chatroom topic.
+
+[p2p]
+# Enable file availability notifications on the chatroom topic
+# When a peer's files change, publish a notification to this topic
+# This allows the demo UI to automatically refresh file lists
+fileUpdateNotifyTopic = "chatroom"

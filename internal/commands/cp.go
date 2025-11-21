@@ -96,23 +96,33 @@ func findMatchingFiles(pattern string) ([]string, error) {
 
 	var matches []string
 
-	// List files from the html/ directory in the bundle
+	// List files from html/ and config/ directories in the bundle
 	for _, f := range zipReader.File {
-		// Only include files from html/ directory
-		if strings.HasPrefix(f.Name, "html/") && !f.FileInfo().IsDir() {
-			// Remove html/ prefix
-			relPath := strings.TrimPrefix(f.Name, "html/")
-			fileName := filepath.Base(relPath)
+		if f.FileInfo().IsDir() {
+			continue
+		}
 
-			// Match against pattern
-			matched, err := filepath.Match(pattern, fileName)
-			if err != nil {
-				return nil, fmt.Errorf("invalid pattern %s: %w", pattern, err)
-			}
+		var relPath string
+		// Check html/ directory
+		if strings.HasPrefix(f.Name, "html/") {
+			relPath = strings.TrimPrefix(f.Name, "html/")
+		} else if strings.HasPrefix(f.Name, "config/") {
+			// Check config/ directory
+			relPath = strings.TrimPrefix(f.Name, "config/")
+		} else {
+			continue
+		}
 
-			if matched {
-				matches = append(matches, relPath)
-			}
+		fileName := filepath.Base(relPath)
+
+		// Match against pattern
+		matched, err := filepath.Match(pattern, fileName)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pattern %s: %w", pattern, err)
+		}
+
+		if matched {
+			matches = append(matches, relPath)
 		}
 	}
 
@@ -130,12 +140,21 @@ func copyFile(srcPath string, destDir string) error {
 		return fmt.Errorf("binary is not bundled")
 	}
 
-	// Find the file in the bundle
-	targetPath := "html/" + srcPath
+	// Find the file in the bundle (check html/ and config/ directories)
+	possiblePaths := []string{
+		"html/" + srcPath,
+		"config/" + srcPath,
+	}
+
 	var targetFile *zip.File
-	for _, f := range zipReader.File {
-		if f.Name == targetPath {
-			targetFile = f
+	for _, targetPath := range possiblePaths {
+		for _, f := range zipReader.File {
+			if f.Name == targetPath {
+				targetFile = f
+				break
+			}
+		}
+		if targetFile != nil {
 			break
 		}
 	}

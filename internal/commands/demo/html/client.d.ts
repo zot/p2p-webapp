@@ -1,4 +1,4 @@
-import { FileEntry, FileContent, ProtocolDataCallback, TopicDataCallback, PeerChangeCallback } from './types.js';
+import { FileEntry, FileContent, StoreFileResponse, ProtocolDataCallback, TopicDataCallback, PeerChangeCallback } from './types.js';
 export declare class P2PWebAppClient {
     private ws;
     private _peerID;
@@ -80,15 +80,15 @@ export declare class P2PWebAppClient {
      * Store file for this peer
      * @param path File path identifier
      * @param content File content as string or Uint8Array
-     * @returns Promise resolving to CID of the stored file node
+     * @returns Promise resolving to StoreFileResponse with fileCid and rootCid
      */
-    storeFile(path: string, content: string | Uint8Array): Promise<string>;
+    storeFile(path: string, content: string | Uint8Array): Promise<StoreFileResponse>;
     /**
      * Create directory for this peer
      * @param path Directory path identifier
-     * @returns Promise resolving to CID of the stored directory node
+     * @returns Promise resolving to StoreFileResponse with fileCid and rootCid
      */
-    createDirectory(path: string): Promise<string>;
+    createDirectory(path: string): Promise<StoreFileResponse>;
     /**
      * Remove a file from this peer's storage
      * @param path File path identifier

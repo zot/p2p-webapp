@@ -69,15 +69,17 @@ This sequence demonstrates the file storage operation with ownership enforcement
           │                                          │                                            │                              │    │ Update directoryCID│
           │                                          │                                            │                              │<───┘                     │
           │                                          │                                            │                              │                          │
-          │                                          │                        Return CID of stored file/directory node           │                          │
+          │                                          │             Return file CID and root CID (StoreFileResponse)              │                          │
           │                                          │<──────────────────────────────────────────────────────────────────────────│                          │
           │                                          │                                            │                              │                          │
-          │  storeFile response (CID of new node)    │                                            │                              │                          │
+          │  storeFile response {fileCid, rootCid}   │                                            │                              │                          │
           │<─────────────────────────────────────────│                                            │                              │                          │
           │                                          │                                            │                              │                          │
-          │────┐                                  ╔══╧══════════════════════════════╗             │                              │                          │
-          │    │ Store returned CID for sharing   ║Client can use CID for sharing  ░║             │                              │                          │
-          │<───┘                                  ╚══╤══════════════════════════════╝             │                              │                          │
+          │────┐                                  ╔══╧══════════════════════════════════════════╗ │                              │                          │
+          │    │ Store file CID for sharing       ║Client receives both CIDs:                  ░║ │                              │                          │
+          │    │ Store root CID for persistence   ║- fileCid for sharing content                ║ │                              │                          │
+          │<───┘                                  ║- rootCid for persisting peer directory state║ │                              │                          │
+          │                                       ╚══╤══════════════════════════════════════════╝ │                              │                          │
      ┌────┴───┐                             ┌────────┴───────┐                              ┌─────┴─────┐                      ┌──┴─┐                ┌──────┴──────┐
      │Client A│                             │WebSocketHandler│                              │PeerManager│                      │Peer│                │HAMTDirectory│
      └────────┘                             └────────────────┘                              └───────────┘                      └────┘                └─────────────┘

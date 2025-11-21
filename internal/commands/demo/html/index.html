@@ -267,6 +267,23 @@
             opacity: 0.8;
         }
 
+        .peer-item .unread-badge {
+            display: inline-block;
+            background: #e74c3c;
+            color: white;
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 0.15rem 0.4rem;
+            border-radius: 10px;
+            margin-left: 0.5rem;
+            min-width: 1.2rem;
+            text-align: center;
+        }
+
+        .peer-item.active .unread-badge {
+            background: #c0392b;
+        }
+
         /* File Browser Modal */
         #file-browser-modal {
             display: none;
@@ -529,6 +546,7 @@
         let peers = new Map(); // peerID -> { name }
         let dmMessages = new Map(); // peerID -> [{text, isOwn, timestamp}]
         let roomMessages = []; // Store room messages: [{senderPeerID, text, isOwn, timestamp}]
+        let unreadCounts = new Map(); // peerID -> number of unread messages
 
         // File browser state
         const fileBrowserModal = document.getElementById('file-browser-modal');
@@ -646,6 +664,39 @@
             }
         }
 
+        function updateUnreadBadge(peerID) {
+            const peerItem = document.querySelector(`[data-peer-id="${peerID}"]`);
+            if (!peerItem || peerItem.classList.contains('room')) return;
+
+            const count = unreadCounts.get(peerID) || 0;
+            let badge = peerItem.querySelector('.unread-badge');
+
+            if (count > 0) {
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'unread-badge';
+                    const nameDiv = peerItem.querySelector('.peer-name');
+                    nameDiv.appendChild(badge);
+                }
+                badge.textContent = count;
+            } else {
+                if (badge) {
+                    badge.remove();
+                }
+            }
+        }
+
+        function incrementUnreadCount(peerID) {
+            const current = unreadCounts.get(peerID) || 0;
+            unreadCounts.set(peerID, current + 1);
+            updateUnreadBadge(peerID);
+        }
+
+        function clearUnreadCount(peerID) {
+            unreadCounts.set(peerID, 0);
+            updateUnreadBadge(peerID);
+        }
+
         function addPeerToList(peerID, name) {
             if (peerID === client.peerID) return; // Don't add ourselves
             if (document.querySelector(`[data-peer-id="${peerID}"]`)) return; // Already exists
@@ -676,6 +727,9 @@
             option.value = peerID;
             option.textContent = name || `Peer ...${peerID.slice(-8)}`;
             peerSelector.appendChild(option);
+
+            // Initialize unread count badge if needed
+            updateUnreadBadge(peerID);
         }
 
         function removePeerFromList(peerID) {
@@ -716,6 +770,7 @@
 
         function switchToDM(peerID) {
                 updateMode('dm', peerID);
+                clearUnreadCount(peerID);
                 displayStoredMessages(peerID);
         }
 
@@ -734,7 +789,19 @@
             // Build hierarchical tree from flat pathname entries
             const tree = {};
 
+            // Handle null/undefined entries
+            if (!entries || typeof entries !== 'object') {
+                console.warn('[File Browser] buildFileTree received invalid entries:', entries);
+                return tree;
+            }
+
             for (const [path, entry] of Object.entries(entries)) {
+                // Skip empty paths
+                if (!path || typeof path !== 'string') {
+                    console.warn('[File Browser] Skipping invalid path:', path);
+                    continue;
+                }
+
                 const parts = path.split('/');
                 let current = tree;
 
@@ -879,8 +946,20 @@
             fileTreeDiv.innerHTML = '<div style="padding: 1rem; text-align: center; color: #999;">Loading...</div>';
 
             try {
+                console.log('[File Browser] Loading files for peer:', peerID);
                 const result = await client.listFiles(peerID);
-                currentFileEntries = buildFileTree(result.entries);
+                console.log('[File Browser] Received file list:', result);
+
+                // Check if result is valid
+                if (!result || typeof result !== 'object') {
+                    throw new Error('Invalid result from listFiles: ' + JSON.stringify(result));
+                }
+
+                // Handle empty or missing entries
+                const entries = result.entries || {};
+                console.log('[File Browser] Processing', Object.keys(entries).length, 'entries');
+
+                currentFileEntries = buildFileTree(entries);
                 renderFileTree(currentFileEntries, fileTreeDiv);
 
                 // Update UI based on whether viewing own files
@@ -891,8 +970,8 @@
                 createDirBtn.textContent = isOwnFiles ? 'New Folder' : '🚫 New Folder';
                 dropZone.classList.toggle('hidden', !isOwnFiles);
             } catch (error) {
-                console.error('Failed to load files:', error);
-                fileTreeDiv.innerHTML = '<div style="padding: 1rem; text-align: center; color: #e74c3c;">Failed to load files</div>';
+                console.error('[File Browser] Failed to load files:', error);
+                fileTreeDiv.innerHTML = '<div style="padding: 1rem; text-align: center; color: #e74c3c;">Failed to load files: ' + error.message + '</div>';
             }
         }
 
@@ -925,6 +1004,12 @@
         }
 
         async function uploadFiles(files) {
+            // Show loading indicator
+            fileTreeDiv.innerHTML = '<div style="padding: 1rem; text-align: center; color: #3498db;">Uploading ' + files.length + ' file(s)...</div>';
+
+            let successCount = 0;
+            let failCount = 0;
+
             for (const file of files) {
                 try {
                     const content = await file.arrayBuffer();
@@ -932,9 +1017,10 @@
                     // Prefix with selected folder path
                     const filePath = selectedFolder.get() ? `${selectedFolder.get()}/${file.name}` : file.name;
                     await client.storeFile(filePath, uint8Array);
+                    successCount++;
                 } catch (error) {
                     console.error(`Failed to upload ${file.name}:`, error);
-                    alert(`Failed to upload ${file.name}`);
+                    failCount++;
                 }
             }
 
@@ -942,6 +1028,16 @@
             if (selectedFolder.get()) {
                 expandedDirs.add(selectedFolder.get());
             }
+
+            // Show brief success/error message before reloading
+            if (failCount === 0) {
+                fileTreeDiv.innerHTML = '<div style="padding: 1rem; text-align: center; color: #27ae60;">✓ Uploaded ' + successCount + ' file(s) successfully</div>';
+            } else {
+                fileTreeDiv.innerHTML = '<div style="padding: 1rem; text-align: center; color: #e74c3c;">⚠ Uploaded ' + successCount + ' file(s), ' + failCount + ' failed</div>';
+            }
+
+            // Wait a moment before reloading to let user see the message
+            await new Promise(resolve => setTimeout(resolve, 500));
 
             // Reload file list
             await loadPeerFiles(client.peerID);
@@ -1069,6 +1165,9 @@
                     // Only display if currently viewing this DM
                     if (currentMode === 'dm' && currentPeerID === peer) {
                         addMessage(peer, data.text, false);
+                    } else {
+                        // Increment unread count if not currently viewing this peer's DM
+                        incrementUnreadCount(peer);
                     }
                 });
 
@@ -1079,9 +1178,9 @@
                     (senderPeerID, data) => {
                         // Handle file update notifications
                         if (data.type === 'p2p-webapp-file-update' && data.peer) {
-                            // If we're currently viewing this peer's files, refresh the file list
-                            if (currentFilePeerID === data.peer && currentTab === 'files') {
-                                client.listFiles(data.peer).catch(err => {
+                            // If we're currently viewing this peer's files in the file browser, refresh the file list
+                            if (currentFilePeerID === data.peer && fileBrowserModal.classList.contains('active')) {
+                                loadPeerFiles(data.peer).catch(err => {
                                     console.error('Error refreshing file list:', err);
                                 });
                             }

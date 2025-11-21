@@ -460,7 +460,7 @@ manager, err := peer.NewManager(ctx, bootstrapHost, ipfsPeer,
 
 ### Other Configuration Options
 
-See `p2p-webapp.example.toml` for complete configuration reference:
+See `docs/examples/p2p-webapp.toml` for complete configuration reference:
 
 - **[server]**: Port, port range, header size, timeouts
 - **[http]**: Cache control, security headers, CORS
@@ -789,6 +789,284 @@ cat /tmp/.p2p-webapp
    - Document all exported symbols
    - Add examples for complex APIs
    - Keep docs in sync with code
+
+### Synchronization Hygiene
+
+**CRITICAL**: Proper synchronization is essential to prevent deadlocks, race conditions, and performance issues in concurrent Go code.
+
+#### Core Principles
+
+##### 1. Centralize Locking Around Resources
+
+**Rule**: Only the object that owns a resource should lock and unlock access to it.
+
+```go
+// ✅ GOOD: Manager owns peers map and controls its lock
+func (m *Manager) GetPeer(id string) (*Peer, error) {
+    m.mu.RLock()
+    defer m.mu.RUnlock()
+    peer, exists := m.peers[id]
+    if !exists {
+        return nil, fmt.Errorf("peer not found")
+    }
+    return peer, nil
+}
+
+// ❌ BAD: Method leaves resource locked
+func (m *Manager) LockPeers() {
+    m.mu.Lock()  // Caller must remember to unlock!
+}
+```
+
+**Exception**: Component lock systems (like `pidfile_unix.go` providing primitives for `pidfile.go`) are acceptable.
+
+##### 2. Never Hold Locks While Calling Other Objects
+
+```go
+// ✅ GOOD: Copy data under lock, then call external method
+func (m *Manager) NotifyPeers(msg string) {
+    m.mu.RLock()
+    peersCopy := make([]*Peer, 0, len(m.peers))
+    for _, p := range m.peers {
+        peersCopy = append(peersCopy, p)
+    }
+    m.mu.RUnlock()
+
+    // Now safe to call methods on peers
+    for _, p := range peersCopy {
+        p.Notify(msg)
+    }
+}
+
+// ❌ BAD: Holding lock while calling peer methods
+func (m *Manager) NotifyPeers(msg string) {
+    m.mu.RLock()
+    defer m.mu.RUnlock()
+    for _, p := range m.peers {
+        p.Notify(msg)  // What if Notify() tries to lock something?
+    }
+}
+```
+
+##### 3. Minimize Lock Duration
+
+**Pattern**: Lock → Extract Data → Unlock → Process
+
+```go
+// ✅ GOOD: Minimal lock time for queue processing
+func (q *Queue) ProcessMessages() {
+    for {
+        // Lock only to dequeue
+        q.mu.Lock()
+        if len(q.messages) == 0 {
+            q.mu.Unlock()
+            break
+        }
+        msg := q.messages[0]
+        q.messages = q.messages[1:]
+        q.mu.Unlock()
+
+        // Process without holding lock
+        processMessage(msg)
+    }
+}
+
+// ❌ BAD: Holding lock during processing
+func (q *Queue) ProcessMessages() {
+    q.mu.Lock()
+    defer q.mu.Unlock()
+    for _, msg := range q.messages {
+        processMessage(msg)  // Lock held entire time!
+    }
+    q.messages = nil
+}
+```
+
+#### Anti-Patterns to Avoid
+
+##### ❌ Holding Locks During I/O Operations
+
+```go
+// ❌ BAD: Network I/O under lock
+func (p *Peer) StoreFile(path string, content []byte) error {
+    p.mu.Lock()
+    defer p.mu.Unlock()
+
+    // IPFS AddFile does network I/O!
+    node, err := p.ipfs.AddFile(content)  // DEADLOCK RISK
+    if err != nil {
+        return err
+    }
+    p.files[path] = node
+    return nil
+}
+
+// ✅ GOOD: I/O without lock, then update under lock
+func (p *Peer) StoreFile(path string, content []byte) error {
+    // Do I/O without holding lock
+    node, err := p.ipfs.AddFile(content)
+    if err != nil {
+        return err
+    }
+
+    // Lock only to update map
+    p.mu.Lock()
+    p.files[path] = node
+    p.mu.Unlock()
+    return nil
+}
+```
+
+##### ❌ Nested Locking
+
+```go
+// ❌ BAD: Acquiring another lock while holding one
+func (m *Manager) ConnectPeers(id1, id2 string) error {
+    m.mu.RLock()  // Manager lock
+    p1 := m.peers[id1]
+
+    p1.mu.Lock()  // Peer lock while holding manager lock
+    // ... DEADLOCK RISK if another goroutine locks in different order
+    p1.mu.Unlock()
+
+    m.mu.RUnlock()
+    return nil
+}
+
+// ✅ GOOD: Get references, then lock individually
+func (m *Manager) ConnectPeers(id1, id2 string) error {
+    m.mu.RLock()
+    p1 := m.peers[id1]
+    p2 := m.peers[id2]
+    m.mu.RUnlock()
+
+    // Now safe to work with peers
+    if err := p1.Connect(p2); err != nil {
+        return err
+    }
+    return nil
+}
+```
+
+##### ❌ Long Critical Sections
+
+```go
+// ❌ BAD: Lock held during entire peer creation
+func (m *Manager) CreatePeer() (*Peer, error) {
+    m.mu.Lock()
+    defer m.mu.Unlock()
+
+    // libp2p host creation can take seconds!
+    host, err := libp2p.New(...)
+
+    peer := &Peer{host: host}
+    m.peers[peer.ID()] = peer
+    return peer, nil
+}
+
+// ✅ GOOD: Lock only for map update
+func (m *Manager) CreatePeer() (*Peer, error) {
+    // Do expensive work without lock
+    host, err := libp2p.New(...)
+    if err != nil {
+        return nil, err
+    }
+
+    peer := &Peer{host: host}
+
+    // Lock only to add to map
+    m.mu.Lock()
+    m.peers[peer.ID()] = peer
+    m.mu.Unlock()
+
+    return peer, nil
+}
+```
+
+#### When to Use `withResource` Patterns
+
+Avoid `withResource(func)` patterns when possible, as they maximize lock duration:
+
+```go
+// ⚠️ ACCEPTABLE BUT NOT PREFERRED
+func (m *Manager) WithPeers(fn func(map[string]*Peer)) {
+    m.mu.RLock()
+    defer m.mu.RUnlock()
+    fn(m.peers)  // Caller's function runs under lock
+}
+
+// ✅ BETTER: Return a copy
+func (m *Manager) GetPeersCopy() map[string]*Peer {
+    m.mu.RLock()
+    defer m.mu.RUnlock()
+
+    copy := make(map[string]*Peer, len(m.peers))
+    for k, v := range m.peers {
+        copy[k] = v
+    }
+    return copy
+}
+```
+
+Use `withResource` only when:
+1. Copying data is too expensive
+2. Caller needs transactional semantics
+3. The callback is guaranteed to be fast (no I/O, no external calls)
+
+#### Code Review Checklist
+
+When reviewing code with locks, check:
+
+- [ ] No I/O operations while holding lock
+- [ ] No network calls while holding lock
+- [ ] No calls to methods on other objects while holding lock
+- [ ] No nested lock acquisitions
+- [ ] Lock held for minimal time
+- [ ] `defer unlock()` used appropriately
+- [ ] No locks left held on method exit (except component systems)
+- [ ] Consider: could this deadlock with another goroutine?
+
+#### Common Patterns
+
+**Pattern 1: Two-Phase Update**
+```go
+// Phase 1: Prepare data (no lock)
+newData := prepareExpensiveData()
+
+// Phase 2: Update (minimal lock)
+m.mu.Lock()
+m.data = newData
+m.mu.Unlock()
+```
+
+**Pattern 2: Copy-Modify-Replace**
+```go
+m.mu.RLock()
+oldSlice := m.items
+m.mu.RUnlock()
+
+// Work with copy
+newSlice := append([]Item{}, oldSlice...)
+newSlice = append(newSlice, newItem)
+
+m.mu.Lock()
+m.items = newSlice
+m.mu.Unlock()
+```
+
+**Pattern 3: Extract-Process**
+```go
+// Extract work under lock
+m.mu.Lock()
+workItems := m.queue
+m.queue = nil
+m.mu.Unlock()
+
+// Process without lock
+for _, item := range workItems {
+    process(item)
+}
+```
 
 ### Performance
 

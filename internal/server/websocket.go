@@ -116,6 +116,14 @@ func (ws *WSConnection) readPump() {
 	defer ws.Close()
 
 	for {
+		// Check if connection is already closed before reading
+		ws.mu.Lock()
+		closed := ws.closed
+		ws.mu.Unlock()
+		if closed {
+			return
+		}
+
 		_, data, err := ws.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
@@ -163,9 +171,24 @@ func (ws *WSConnection) readPump() {
 			}
 		}
 
+		// Check if connection is still open before sending response
+		ws.mu.Lock()
+		closed = ws.closed
+		ws.mu.Unlock()
+		if closed {
+			if ws.manager != nil {
+				peerID := ws.peerID
+				if peerID == "" {
+					peerID = "unknown"
+				}
+				ws.manager.LogVerbose(peerID, 2, "Connection closed, cannot send response for req %d", msg.RequestID)
+			}
+			return
+		}
+
 		// Send response
 		if err := ws.SendMessage(response); err != nil {
-			fmt.Printf("Failed to send response: %v\n", err)
+			fmt.Printf("Failed to send response for req %d: %v\n", msg.RequestID, err)
 			return
 		}
 	}

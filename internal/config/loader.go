@@ -17,7 +17,7 @@ const ConfigFileName = "p2p-webapp.toml"
 // Returns default config if file doesn't exist
 // CRC: crc-ConfigLoader.md
 func LoadFromDir(baseDir string) (*Config, error) {
-	configPath := filepath.Join(baseDir, ConfigFileName)
+	configPath := filepath.Join(baseDir, "config", ConfigFileName)
 
 	// Check if config file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -38,10 +38,11 @@ func LoadFromDir(baseDir string) (*Config, error) {
 // Returns default config if file doesn't exist in archive
 // CRC: crc-ConfigLoader.md
 func LoadFromZIP(reader *zip.Reader) (*Config, error) {
-	// Look for config file in ZIP root
+	// Look for config file in config/ subdirectory
+	configPathInZip := "config/" + ConfigFileName
 	var configFile *zip.File
 	for _, f := range reader.File {
-		if f.Name == ConfigFileName {
+		if f.Name == configPathInZip {
 			configFile = f
 			break
 		}

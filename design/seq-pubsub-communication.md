@@ -85,6 +85,11 @@
 - Peers advertise topic subscriptions via DHT
 - Automatic peer join/leave monitoring for subscribed topics
 - Handler gets Peer from PeerManager, then calls peer.Subscribe(topic)
+- **Subscribe() waits for gossip mesh formation** (up to 2 seconds):
+  - GossipSub mesh forms via periodic heartbeats (50ms initial, 500ms interval)
+  - Subscribe() blocks until at least one peer appears in mesh or timeout occurs
+  - Ensures peers can communicate immediately after subscribe returns
+  - Optimized GossipSub parameters for small/local networks (D=2, Dlo=1)
 - Handler gets Peer from PeerManager, then calls peer.Publish(topic, data)
 - Peer sends peerChange notifications automatically via PeerManager callbacks
 - Messages broadcast to all subscribed peers

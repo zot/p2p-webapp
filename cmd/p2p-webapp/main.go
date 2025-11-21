@@ -61,6 +61,7 @@ func init() {
 	rootCmd.AddCommand(commands.BundleCmd)
 	rootCmd.AddCommand(commands.LsCmd)
 	rootCmd.AddCommand(commands.CpCmd)
+	rootCmd.AddCommand(commands.CatCmd)
 	rootCmd.AddCommand(commands.PsCmd)
 	rootCmd.AddCommand(commands.KillCmd)
 	rootCmd.AddCommand(commands.KillAllCmd)

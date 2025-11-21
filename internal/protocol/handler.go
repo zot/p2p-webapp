@@ -304,13 +304,16 @@ func (h *Handler) handleStoreFile(msg *Message, peerID string) (*Message, error)
 		}
 	}
 
-	cid, err := peer.StoreFile(req.Path, content, req.Directory)
+	fileCID, rootCID, err := peer.StoreFile(req.Path, content, req.Directory)
 	if err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 
-	// Return CID in response
-	response := map[string]string{"cid": cid}
+	// Return file CID and root CID in response
+	response := map[string]string{
+		"fileCid": fileCID,
+		"rootCid": rootCID,
+	}
 	result, _ := json.Marshal(response)
 	return &Message{
 		RequestID:  msg.RequestID,

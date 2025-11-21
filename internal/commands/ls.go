@@ -32,12 +32,21 @@ func runLs(cmd *cobra.Command, args []string) error {
 
 	files := []string{}
 
-	// List files from the html/ directory in the bundle
+	// List files from the bundle (config/ and html/ directories)
 	for _, f := range zipReader.File {
-		// Only include files from html/ directory
-		if strings.HasPrefix(f.Name, "html/") && !f.FileInfo().IsDir() {
-			// Remove html/ prefix
+		if f.FileInfo().IsDir() {
+			continue
+		}
+
+		// Include files from html/ directory
+		if strings.HasPrefix(f.Name, "html/") {
 			relPath := strings.TrimPrefix(f.Name, "html/")
+			files = append(files, relPath)
+		}
+
+		// Include files from config/ directory
+		if strings.HasPrefix(f.Name, "config/") {
+			relPath := strings.TrimPrefix(f.Name, "config/")
 			files = append(files, relPath)
 		}
 	}

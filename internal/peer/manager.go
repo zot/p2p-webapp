@@ -60,7 +60,7 @@ type PeerOperations interface {
 	// File operations
 	ListFiles(targetPeerID string) error
 	GetFile(cidStr string) error
-	StoreFile(filepath string, content []byte, directory bool) (string, error)
+	StoreFile(filepath string, content []byte, directory bool) (string, string, error)
 	RemoveFile(filepath string) error
 }
 
@@ -292,14 +292,27 @@ func (m *Manager) prepareCreatePeer(requestedPeerKey string) (priv crypto.PrivKe
 // CRC: crc-PeerManager.md
 // Sequence: seq-peer-creation.md
 func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (peerID string, peerKey string, err error) {
+	// ============================================================
+	// PHASE 1: Validate and get peer snapshot (minimal lock)
+	// ============================================================
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	// Prepare and validate peer creation (checks for duplicates)
 	priv, err := m.prepareCreatePeer(requestedPeerKey)
 	if err != nil {
+		m.mu.Unlock()
 		return "", "", err
 	}
+
+	// Get snapshot of existing peers for later connection
+	existingPeers := make([]*Peer, 0, len(m.peers))
+	for _, p := range m.peers {
+		existingPeers = append(existingPeers, p)
+	}
+	m.mu.Unlock()
+
+	// ============================================================
+	// PHASE 2: Do all network/IPFS I/O WITHOUT holding lock
+	// ============================================================
 
 	// Marshal and encode the private key for return
 	keyBytes, err := crypto.MarshalPrivateKey(priv)
@@ -366,14 +379,47 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 	}
 
 	// Create pubsub with DHT-based discovery for global peer finding
+	// Configure GossipSub with faster heartbeat for quicker mesh formation
 	var ps *pubsub.PubSub
+	gossipSubParams := pubsub.DefaultGossipSubParams()
+	// Use default mesh parameters (D=6, Dlo=5, Dhi=12, Dout=2) which are validated and work well
+	// Only adjust heartbeat timing for faster mesh formation in local networks
+	gossipSubParams.HeartbeatInitialDelay = 50 * time.Millisecond  // Faster initial heartbeat for quick mesh formation
+	gossipSubParams.HeartbeatInterval = 500 * time.Millisecond     // More frequent heartbeats (default: 1s)
+
+	// Build direct peer list from existing peers in the same Manager
+	// This guarantees localhost peers are always in each other's mesh
+	directPeerInfos := make([]peer.AddrInfo, 0, len(existingPeers))
+	for _, otherPeer := range existingPeers {
+		directPeerInfos = append(directPeerInfos, peer.AddrInfo{
+			ID:    otherPeer.peerID,
+			Addrs: otherPeer.host.Addrs(),
+		})
+	}
+	m.LogVerbose(h.ID().String(), 2, "Configuring GossipSub with %d direct peers", len(directPeerInfos))
+
 	if kdht != nil {
 		// Use DHT for topic-based peer discovery (enables global connectivity)
 		routingDiscovery := discoveryrouting.NewRoutingDiscovery(kdht)
-		ps, err = pubsub.NewGossipSub(m.ctx, h, pubsub.WithDiscovery(routingDiscovery))
+		ps, err = pubsub.NewGossipSub(
+			m.ctx,
+			h,
+			pubsub.WithDiscovery(routingDiscovery),
+			pubsub.WithPeerExchange(true),    // Enable peer exchange
+			pubsub.WithFloodPublish(true),    // Flood publish for reliability in small networks
+			pubsub.WithGossipSubParams(gossipSubParams),
+			pubsub.WithDirectPeers(directPeerInfos), // Guarantee mesh inclusion for localhost peers
+		)
 	} else {
 		// Fallback without discovery
-		ps, err = pubsub.NewGossipSub(m.ctx, h)
+		ps, err = pubsub.NewGossipSub(
+			m.ctx,
+			h,
+			pubsub.WithPeerExchange(true),    // Enable peer exchange
+			pubsub.WithFloodPublish(true),    // Flood publish for reliability in small networks
+			pubsub.WithGossipSubParams(gossipSubParams),
+			pubsub.WithDirectPeers(directPeerInfos), // Guarantee mesh inclusion for localhost peers
+		)
 	}
 	if err != nil {
 		mdnsService.Close()
@@ -401,34 +447,102 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 	// Initialize virtual connection manager
 	p.vcm = NewVirtualConnectionManager(m.ctx, p)
 
-	// Connect to other peers in the same manager for local pubsub
-	for _, otherPeer := range m.peers {
-		// Try to connect peers to each other
+	// Connect to other peers in the same manager for local pubsub (network I/O - no lock held!)
+	for _, otherPeer := range existingPeers {
+		// Try to connect peers to each other with exponential backoff retries
 		addrs := otherPeer.host.Addrs()
+		m.LogVerbose(h.ID().String(), 2, "Manual connect: new peer -> %s (addrs: %d)", otherPeer.peerID.String(), len(addrs))
 		if len(addrs) > 0 {
 			peerInfo := peer.AddrInfo{
 				ID:    otherPeer.peerID,
 				Addrs: addrs,
 			}
-			// Best effort connection, ignore errors
-			_ = h.Connect(m.ctx, peerInfo)
+			// Retry with exponential backoff for up to 15 seconds
+			// Backoff sequence: 0ms, 100ms, 200ms, 400ms, 800ms, 1600ms, 3200ms, 6400ms, ...
+			const maxRetryDuration = 15 * time.Second
+			startTime := time.Now()
+			attempt := 0
+			connected := false
+			backoff := 100 * time.Millisecond
+
+			for time.Since(startTime) < maxRetryDuration {
+				attempt++
+				if attempt > 1 {
+					m.LogVerbose(h.ID().String(), 2, "Manual connect retry attempt %d after %v (elapsed: %v)", attempt, backoff, time.Since(startTime))
+					time.Sleep(backoff)
+					backoff *= 2 // Double backoff for next attempt
+					if backoff > 10*time.Second {
+						backoff = 10 * time.Second // Cap at 10 seconds
+					}
+				}
+				if err := h.Connect(m.ctx, peerInfo); err != nil {
+					m.LogVerbose(h.ID().String(), 2, "Manual connect attempt %d FAILED: new peer -> %s: %v", attempt, otherPeer.peerID.String(), err)
+				} else {
+					m.LogVerbose(h.ID().String(), 2, "Manual connect SUCCESS on attempt %d (elapsed: %v): new peer -> %s", attempt, time.Since(startTime), otherPeer.peerID.String())
+					connected = true
+					break
+				}
+			}
+			if !connected {
+				m.LogVerbose(h.ID().String(), 1, "Manual connect failed after %v: new peer -> %s", time.Since(startTime), otherPeer.peerID.String())
+			}
 		}
 	}
 
-	// Set alias for the peer (we already hold the lock)
-	p.alias = m.getOrCreateAliasLocked(p.peerID.String())
+	// Make existing peers connect back to new peer for bidirectional discovery
+	// This enables fast localhost peer discovery without waiting for mDNS/DHT
+	go func() {
+		newPeerAddrs := h.Addrs()
+		newPeerID := h.ID()
+		m.LogVerbose(newPeerID.String(), 2, "Bidirectional connect: starting reverse connections (addrs: %d)", len(newPeerAddrs))
+		if len(newPeerAddrs) > 0 {
+			newPeerInfo := peer.AddrInfo{
+				ID:    newPeerID,
+				Addrs: newPeerAddrs,
+			}
+			for _, otherPeer := range existingPeers {
+				// Retry with exponential backoff for up to 15 seconds
+				// Backoff sequence: 0ms, 100ms, 200ms, 400ms, 800ms, 1600ms, 3200ms, 6400ms, ...
+				const maxRetryDuration = 15 * time.Second
+				startTime := time.Now()
+				attempt := 0
+				connected := false
+				backoff := 100 * time.Millisecond
 
-	m.peers[p.peerID.String()] = p
+				for time.Since(startTime) < maxRetryDuration {
+					attempt++
+					if attempt > 1 {
+						m.LogVerbose(newPeerID.String(), 2, "Bidirectional connect retry attempt %d after %v (elapsed: %v)", attempt, backoff, time.Since(startTime))
+						time.Sleep(backoff)
+						backoff *= 2 // Double backoff for next attempt
+						if backoff > 10*time.Second {
+							backoff = 10 * time.Second // Cap at 10 seconds
+						}
+					}
+					m.LogVerbose(newPeerID.String(), 2, "Bidirectional connect attempt %d: %s -> new peer", attempt, otherPeer.peerID.String())
+					if err := otherPeer.host.Connect(m.ctx, newPeerInfo); err != nil {
+						m.LogVerbose(newPeerID.String(), 2, "Bidirectional connect attempt %d FAILED: %s -> new peer: %v", attempt, otherPeer.peerID.String(), err)
+					} else {
+						m.LogVerbose(newPeerID.String(), 2, "Bidirectional connect SUCCESS on attempt %d (elapsed: %v): %s -> new peer", attempt, time.Since(startTime), otherPeer.peerID.String())
+						connected = true
+						break
+					}
+				}
+				if !connected {
+					m.LogVerbose(newPeerID.String(), 1, "Bidirectional connect failed after %v: %s -> new peer", time.Since(startTime), otherPeer.peerID.String())
+				}
+			}
+		}
+	}()
 
-	// Initialize file storage for this peer
+	// Initialize file storage for this peer (IPFS I/O - no lock held!)
 	// CRC: crc-PeerManager.md
 	// Sequence: seq-store-file.md, seq-list-files.md
 	if rootDirectory != "" {
 		// Restore from existing directory CID
 		dirCID, err := cid.Decode(rootDirectory)
 		if err != nil {
-			// Clean up peer on error
-			delete(m.peers, p.peerID.String())
+			// Clean up peer on error (peer not yet added to m.peers)
 			p.Close()
 			return "", "", fmt.Errorf("failed to parse root directory CID: %w", err)
 		}
@@ -436,7 +550,6 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 		// Load directory node from IPFS
 		dirNode, err := m.ipfsPeer.Get(m.ctx, dirCID)
 		if err != nil {
-			delete(m.peers, p.peerID.String())
 			p.Close()
 			return "", "", fmt.Errorf("failed to load directory from IPFS: %w", err)
 		}
@@ -444,7 +557,6 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 		// Create HAMTDirectory from existing node
 		dir, err := uio.NewHAMTDirectoryFromNode(m.ipfsPeer, dirNode)
 		if err != nil {
-			delete(m.peers, p.peerID.String())
 			p.Close()
 			return "", "", fmt.Errorf("failed to create directory from node: %w", err)
 		}
@@ -455,7 +567,6 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 		// Create new empty HAMTDirectory
 		dir, err := uio.NewHAMTDirectory(m.ipfsPeer, 0)
 		if err != nil {
-			delete(m.peers, p.peerID.String())
 			p.Close()
 			return "", "", fmt.Errorf("failed to create directory: %w", err)
 		}
@@ -463,7 +574,6 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 		// Get the node and CID
 		dirNode, err := dir.GetNode()
 		if err != nil {
-			delete(m.peers, p.peerID.String())
 			p.Close()
 			return "", "", fmt.Errorf("failed to get directory node: %w", err)
 		}
@@ -475,6 +585,18 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 
 	// Register protocol handler for file list queries
 	h.SetStreamHandler(protocol.ID(P2PWebAppProtocol), p.handleP2PWebAppStream)
+
+	// ============================================================
+	// PHASE 3: Update Manager state (minimal lock)
+	// ============================================================
+	m.mu.Lock()
+	p.alias = m.getOrCreateAliasLocked(p.peerID.String())
+	m.peers[p.peerID.String()] = p
+	m.mu.Unlock()
+
+	// ============================================================
+	// PHASE 4: Post-processing (no lock needed)
+	// ============================================================
 
 	// Log peer creation with connectivity info
 	if m.verbosity >= 1 {
@@ -985,6 +1107,10 @@ func (p *Peer) Subscribe(topic string) error {
 	// Start reading messages
 	go p.readFromTopic(handler)
 
+	// Wait for gossip mesh to form before returning
+	// This ensures peers can communicate immediately after Subscribe() returns
+	p.waitForMeshFormation(t)
+
 	return nil
 }
 
@@ -1038,6 +1164,35 @@ func (p *Peer) Unsubscribe(topic string) error {
 	handler.PubsubTopic.Close()
 
 	return nil
+}
+
+// waitForMeshFormation waits for the gossip mesh to form after subscribing to a topic
+// This ensures peers can communicate immediately after Subscribe() returns
+func (p *Peer) waitForMeshFormation(t *pubsub.Topic) {
+	// Create timeout context - increased from 2s to 5s to handle slower mesh formation
+	ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
+	defer cancel()
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Timeout reached - mesh may not have formed, but proceed anyway
+			// This can happen if there are no other peers subscribed yet
+			return
+		case <-ticker.C:
+			// Check if any peers are in the GossipSub mesh for this topic
+			meshPeers := t.ListPeers()
+			if len(meshPeers) > 0 {
+				// Found peers in mesh - wait one heartbeat cycle for mesh to stabilize
+				// Heartbeat interval is 500ms, so wait 600ms to be safe
+				time.Sleep(600 * time.Millisecond)
+				return
+			}
+		}
+	}
 }
 
 func (p *Peer) ListPeers(topic string) ([]string, error) {
@@ -1346,54 +1501,60 @@ func (p *Peer) GetFile(cidStr string) error {
 // StoreFile stores file or directory in IPFS and adds it to the peer's HAMTDirectory
 // CRC: crc-Peer.md
 // Sequence: seq-store-file.md
-func (p *Peer) StoreFile(filepath string, content []byte, directory bool) (string, error) {
+func (p *Peer) StoreFile(filepath string, content []byte, directory bool) (string, string, error) {
 	if p.manager.ipfsPeer == nil {
-		return "", fmt.Errorf("IPFS peer not initialized")
+		return "", "", fmt.Errorf("IPFS peer not initialized")
 	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	// Validate parameters
 	if directory && content != nil {
-		return "", fmt.Errorf("directory cannot have content")
+		return "", "", fmt.Errorf("directory cannot have content")
 	}
 	if !directory && content == nil {
-		return "", fmt.Errorf("file must have content")
-	}
-
-	var newNode ipld.Node
-	var err error
-
-	// Create node based on type
-	if directory {
-		// Create empty HAMTDirectory
-		dir, err := uio.NewHAMTDirectory(p.manager.ipfsPeer, 0)
-		if err != nil {
-			return "", fmt.Errorf("failed to create directory: %w", err)
-		}
-		newNode, err = dir.GetNode()
-		if err != nil {
-			return "", fmt.Errorf("failed to get directory node: %w", err)
-		}
-	} else {
-		// Create file node
-		newNode, err = p.manager.ipfsPeer.AddFile(p.ctx, bytes.NewReader(content), nil)
-		if err != nil {
-			return "", fmt.Errorf("failed to add file to IPFS: %w", err)
-		}
+		return "", "", fmt.Errorf("file must have content")
 	}
 
 	// Parse path to find parent directory and name
 	parentPath, name := path.Split(filepath)
 	if name == "" {
-		return "", fmt.Errorf("invalid path: must include file/directory name")
+		return "", "", fmt.Errorf("invalid path: must include file/directory name")
 	}
-
-	// Clean parent path
 	parentPath = strings.Trim(parentPath, "/")
 
-	// Helper to add/update child in directory and get new directory
+	// ============================================================
+	// PHASE 1: Get current directory reference (minimal lock)
+	// ============================================================
+	p.mu.RLock()
+	currentRootDir := p.directory
+	p.mu.RUnlock()
+
+	// ============================================================
+	// PHASE 2: Do all IPFS work WITHOUT holding lock
+	// ============================================================
+
+	// Create the new file/directory node
+	var newNode ipld.Node
+	var err error
+
+	if directory {
+		// Create empty HAMTDirectory
+		dir, err := uio.NewHAMTDirectory(p.manager.ipfsPeer, 0)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to create directory: %w", err)
+		}
+		newNode, err = dir.GetNode()
+		if err != nil {
+			return "", "", fmt.Errorf("failed to get directory node: %w", err)
+		}
+	} else {
+		// Create file node (IPFS network I/O - no lock held!)
+		newNode, err = p.manager.ipfsPeer.AddFile(p.ctx, bytes.NewReader(content), nil)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to add file to IPFS: %w", err)
+		}
+	}
+
+	// Helper to add/update child in directory
 	updateDir := func(dir *uio.HAMTDirectory, childName string, childNode ipld.Node) (*uio.HAMTDirectory, error) {
 		// Remove existing child if present (for updates)
 		if err := dir.RemoveChild(p.ctx, childName); err != nil && err != os.ErrNotExist {
@@ -1417,30 +1578,30 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) (strin
 		dir  *uio.HAMTDirectory
 		name string
 	}
-	dirStack := []dirLevel{{dir: p.directory, name: ""}}
+	dirStack := []dirLevel{{dir: currentRootDir, name: ""}}
 
 	if parentPath != "" {
 		pathParts := strings.Split(parentPath, "/")
-		currentDir := p.directory
+		currentDir := currentRootDir
 
 		for _, part := range pathParts {
-			// Try to find existing subdirectory
+			// Try to find existing subdirectory (IPFS network I/O - no lock held!)
 			links, err := currentDir.Links(p.ctx)
 			if err != nil {
-				return "", fmt.Errorf("failed to read directory: %w", err)
+				return "", "", fmt.Errorf("failed to read directory: %w", err)
 			}
 
 			found := false
 			for _, link := range links {
 				if link.Name == part {
-					// Found subdirectory, navigate into it
+					// Found subdirectory, navigate into it (IPFS network I/O - no lock held!)
 					node, err := p.manager.ipfsPeer.Get(p.ctx, link.Cid)
 					if err != nil {
-						return "", fmt.Errorf("failed to get subdirectory: %w", err)
+						return "", "", fmt.Errorf("failed to get subdirectory: %w", err)
 					}
 					currentDir, err = uio.NewHAMTDirectoryFromNode(p.manager.ipfsPeer, node)
 					if err != nil {
-						return "", fmt.Errorf("failed to create directory from node: %w", err)
+						return "", "", fmt.Errorf("failed to create directory from node: %w", err)
 					}
 					found = true
 					break
@@ -1451,7 +1612,7 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) (strin
 				// Create new subdirectory
 				currentDir, err = uio.NewHAMTDirectory(p.manager.ipfsPeer, 0)
 				if err != nil {
-					return "", fmt.Errorf("failed to create subdirectory: %w", err)
+					return "", "", fmt.Errorf("failed to create subdirectory: %w", err)
 				}
 			}
 
@@ -1463,7 +1624,7 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) (strin
 	leafDir := dirStack[len(dirStack)-1].dir
 	leafDir, err = updateDir(leafDir, name, newNode)
 	if err != nil {
-		return "", fmt.Errorf("failed to add child: %w", err)
+		return "", "", fmt.Errorf("failed to add child: %w", err)
 	}
 
 	// Rebuild the tree from leaf to root
@@ -1475,38 +1636,49 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) (strin
 		// Get updated child node
 		childNode, err := childDir.GetNode()
 		if err != nil {
-			return "", fmt.Errorf("failed to get child directory node: %w", err)
+			return "", "", fmt.Errorf("failed to get child directory node: %w", err)
 		}
 
 		// Update parent to point to new child
 		parentDir, err = updateDir(parentDir, childName, childNode)
 		if err != nil {
-			return "", fmt.Errorf("failed to update parent directory: %w", err)
+			return "", "", fmt.Errorf("failed to update parent directory: %w", err)
 		}
 
 		dirStack[i-1].dir = parentDir
 	}
 
-	// Update peer's root directory
-	p.directory = dirStack[0].dir
-	rootNode, err := p.directory.GetNode()
+	// Get the final root node
+	newRootDir := dirStack[0].dir
+	rootNode, err := newRootDir.GetNode()
 	if err != nil {
-		return "", fmt.Errorf("failed to get updated directory node: %w", err)
+		return "", "", fmt.Errorf("failed to get updated directory node: %w", err)
 	}
 
 	newRootCID := rootNode.Cid()
-	p.directoryCID = newRootCID
+	resultCID := newNode.Cid().String()
 
+	// ============================================================
+	// PHASE 3: Update peer state (minimal lock)
+	// ============================================================
+	p.mu.Lock()
+	p.directory = newRootDir
+	p.directoryCID = newRootCID
+	p.mu.Unlock()
+
+	// Log the operation
 	typeStr := "file"
 	if directory {
 		typeStr = "directory"
 	}
-	p.logVerbose(2, "Stored %s: %s -> %s", typeStr, filepath, newNode.Cid().String())
+	p.logVerbose(2, "Stored %s: %s -> %s", typeStr, filepath, resultCID)
 
-	// Publish file update notification if configured and subscribed
+	// ============================================================
+	// PHASE 4: Publish notification (no lock needed)
+	// ============================================================
 	p.publishFileUpdateNotification()
 
-	return newNode.Cid().String(), nil
+	return resultCID, newRootCID.String(), nil
 }
 
 // RemoveFile removes a file or directory from the peer's HAMTDirectory
@@ -1517,71 +1689,131 @@ func (p *Peer) RemoveFile(filepath string) error {
 		return fmt.Errorf("IPFS peer not initialized")
 	}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	// Parse path to find parent directory and name
 	parentPath, name := path.Split(filepath)
 	if name == "" {
 		return fmt.Errorf("invalid path: must include file/directory name")
 	}
-
-	// Clean parent path
 	parentPath = strings.Trim(parentPath, "/")
 
-	// Navigate to parent directory
-	parentDir := p.directory
+	// ============================================================
+	// PHASE 1: Get current directory reference (minimal lock)
+	// ============================================================
+	p.mu.RLock()
+	currentRootDir := p.directory
+	p.mu.RUnlock()
+
+	// ============================================================
+	// PHASE 2: Navigate and remove WITHOUT holding lock
+	// ============================================================
+
+	// Parse path components
+	var pathParts []string
 	if parentPath != "" {
-		pathParts := strings.Split(parentPath, "/")
-		for _, part := range pathParts {
-			// Find subdirectory
-			links, err := parentDir.Links(p.ctx)
-			if err != nil {
-				return fmt.Errorf("failed to read directory: %w", err)
-			}
+		pathParts = strings.Split(parentPath, "/")
+	}
 
-			found := false
-			for _, link := range links {
-				if link.Name == part {
-					// Found subdirectory, navigate into it
-					node, err := p.manager.ipfsPeer.Get(p.ctx, link.Cid)
-					if err != nil {
-						return fmt.Errorf("failed to get subdirectory: %w", err)
-					}
-					parentDir, err = uio.NewHAMTDirectoryFromNode(p.manager.ipfsPeer, node)
-					if err != nil {
-						return fmt.Errorf("failed to create directory from node: %w", err)
-					}
-					found = true
-					break
+	// Navigate to parent directory and build stack of directories
+	type dirStackEntry struct {
+		dir  *uio.HAMTDirectory
+		name string
+	}
+	dirStack := []dirStackEntry{{dir: currentRootDir, name: ""}}
+
+	// Navigate down to parent directory (IPFS network I/O - no lock held!)
+	currentDir := currentRootDir
+	for _, part := range pathParts {
+		// Get directory links
+		links, err := currentDir.Links(p.ctx)
+		if err != nil {
+			return fmt.Errorf("failed to read directory: %w", err)
+		}
+
+		// Find the subdirectory
+		found := false
+		for _, link := range links {
+			if link.Name == part {
+				// Get the subdirectory node (IPFS network I/O - no lock held!)
+				node, err := p.manager.ipfsPeer.Get(p.ctx, link.Cid)
+				if err != nil {
+					return fmt.Errorf("failed to get subdirectory: %w", err)
 				}
-			}
 
-			if !found {
-				return fmt.Errorf("parent directory not found: %s", part)
+				// Create directory from node
+				subDir, err := uio.NewHAMTDirectoryFromNode(p.manager.ipfsPeer, node)
+				if err != nil {
+					return fmt.Errorf("failed to create directory from node: %w", err)
+				}
+
+				dirStack = append(dirStack, dirStackEntry{dir: subDir, name: part})
+				currentDir = subDir
+				found = true
+				break
 			}
+		}
+
+		if !found {
+			return fmt.Errorf("parent directory not found: %s", part)
 		}
 	}
 
-	// Remove child from parent directory
+	// Current directory is now the parent directory where we need to remove the child
+	parentDir := currentDir
+
+	// Remove the child from parent directory
 	if err := parentDir.RemoveChild(p.ctx, name); err != nil {
 		return fmt.Errorf("failed to remove child: %w", err)
 	}
 
-	// Get updated root directory node and CID
-	rootNode, err := p.directory.GetNode()
+	// Now rebuild the directory tree from bottom to top
+	// Start from the parent of the removed item and work up to root
+	for i := len(dirStack) - 1; i > 0; i-- {
+		childDir := dirStack[i].dir
+		childName := dirStack[i].name
+		parentDirEntry := dirStack[i-1].dir
+
+		// Get the updated child directory node
+		childNode, err := childDir.GetNode()
+		if err != nil {
+			return fmt.Errorf("failed to get updated child directory node: %w", err)
+		}
+
+		// Remove old child and add updated child to parent
+		if err := parentDirEntry.RemoveChild(p.ctx, childName); err != nil {
+			// Ignore "not found" errors - child might not exist in parent yet
+			if !strings.Contains(err.Error(), "not found") {
+				return fmt.Errorf("failed to remove old child from parent: %w", err)
+			}
+		}
+
+		if err := parentDirEntry.AddChild(p.ctx, childName, childNode); err != nil {
+			return fmt.Errorf("failed to add updated child to parent: %w", err)
+		}
+	}
+
+	// Get the final root node
+	newRootDir := dirStack[0].dir
+	rootNode, err := newRootDir.GetNode()
 	if err != nil {
 		return fmt.Errorf("failed to get updated directory node: %w", err)
 	}
 
 	newRootCID := rootNode.Cid()
 
-	// Update peer's directory CID
+	// ============================================================
+	// PHASE 3: Update peer state (minimal lock)
+	// ============================================================
+	p.mu.Lock()
+	p.directory = newRootDir
 	p.directoryCID = newRootCID
+	p.mu.Unlock()
 
+	// Log the operation
 	p.logVerbose(2, "Removed file/directory: %s", filepath)
 
-	// Publish file update notification if configured and subscribed
+	// ============================================================
+	// PHASE 4: Publish notification (no lock needed)
+	// ============================================================
 	p.publishFileUpdateNotification()
 
 	return nil
@@ -1592,12 +1824,17 @@ func (p *Peer) RemoveFile(filepath string) error {
 // publishFileUpdateNotification publishes a file update notification if configured and subscribed
 func (p *Peer) publishFileUpdateNotification() {
 	// Check if notification topic is configured
+	p.logVerbose(2, "publishFileUpdateNotification: fileUpdateNotifyTopic='%s'", p.manager.fileUpdateNotifyTopic)
 	if p.manager.fileUpdateNotifyTopic == "" {
+		p.logVerbose(2, "publishFileUpdateNotification: topic not configured, skipping")
 		return
 	}
 
 	// Check if peer is subscribed to the notification topic
-	if _, subscribed := p.topics[p.manager.fileUpdateNotifyTopic]; !subscribed {
+	_, subscribed := p.topics[p.manager.fileUpdateNotifyTopic]
+	p.logVerbose(2, "publishFileUpdateNotification: subscribed to '%s'=%v", p.manager.fileUpdateNotifyTopic, subscribed)
+	if !subscribed {
+		p.logVerbose(2, "publishFileUpdateNotification: not subscribed to topic, skipping")
 		return
 	}
 
@@ -1607,6 +1844,7 @@ func (p *Peer) publishFileUpdateNotification() {
 		"peer": p.peerID.String(),
 	}
 
+	p.logVerbose(2, "publishFileUpdateNotification: publishing notification to '%s'", p.manager.fileUpdateNotifyTopic)
 	// Ignore publish errors (best effort notification)
 	_ = p.Publish(p.manager.fileUpdateNotifyTopic, msg)
 }

@@ -92,6 +92,11 @@ export interface RemoveFileRequest {
   path: string;
 }
 
+export interface StoreFileResponse {
+  fileCid: string; // CID of the stored file/directory node
+  rootCid: string; // CID of the peer's updated root directory
+}
+
 // Server request message types
 
 export interface PeerDataRequest {

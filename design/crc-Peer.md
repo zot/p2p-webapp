@@ -23,7 +23,7 @@
 - start: Register protocol listener for incoming streams
 - stop: Remove protocol listener
 - sendToPeer: Send data to peer on protocol (create/reuse stream)
-- subscribe: Subscribe to GossipSub topic, monitor peer join/leave
+- subscribe: Subscribe to GossipSub topic, wait for mesh formation, monitor peer join/leave
 - publish: Publish message to GossipSub topic
 - unsubscribe: Unsubscribe from topic
 - listPeers: Get list of peers subscribed to topic
@@ -31,7 +31,7 @@
 - stopMonitor: Stop monitoring topic
 - listFiles: Request file list from target peer (local or remote via p2p-webapp protocol)
 - getFile: Retrieve IPFS content by CID
-- storeFile: Create file/directory node in IPFS, update HAMTDirectory at path, return CID of stored node, publish file update notification if configured (handles both storeFile and createDirectory operations)
+- storeFile: Create file/directory node in IPFS, update HAMTDirectory at path, return file CID and root CID (StoreFileResponse), publish file update notification if configured (handles both storeFile and createDirectory operations)
 - removeFile: Remove file or directory from HAMTDirectory at path, publish file update notification if configured
 - publishFileUpdateNotification: Publish file change notification to configured topic (if subscribed)
 - handleGetFileList: Handle incoming getFileList() message on p2p-webapp protocol

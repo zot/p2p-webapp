@@ -84,7 +84,7 @@ verbosity = 0           # Logging level (0-3)
 fileUpdateNotifyTopic = "chatroom"  # Use your app's chat topic
 ```
 
-See `p2p-webapp.example.toml` for all available options.
+See `docs/examples/p2p-webapp.toml` for all available options.
 
 ## Using the Demo Application
 
