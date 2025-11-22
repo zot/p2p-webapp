@@ -19,6 +19,7 @@ import (
 	ipfslite "github.com/hsanjuan/ipfs-lite"
 	"github.com/ipfs/boxo/ipld/unixfs"
 	uio "github.com/ipfs/boxo/ipld/unixfs/io"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
 	"github.com/libp2p/go-libp2p"
@@ -2341,9 +2342,12 @@ func (p *Peer) handleGetFile(stream network.Stream) {
 		return
 	}
 
+	// Get raw node data for caching on the requesting peer
+	rawData := node.RawData()
+
 	switch fsNode.Type() {
 	case unixfs.TFile:
-		// Read file content
+		// Read file content for MIME type detection
 		reader, err := uio.NewDagReader(p.ctx, node, p.manager.ipfsPeer)
 		if err != nil {
 			p.logVerbose(1, "handleGetFile: failed to create reader: %v", err)
@@ -2362,11 +2366,11 @@ func (p *Peer) handleGetFile(stream network.Stream) {
 		// Detect MIME type
 		mimeType := http.DetectContentType(content)
 
-		// Send file content response
-		p.sendFileContent(stream, msg.CID, content, mimeType, false, nil)
+		// Send file content response with raw node data for caching
+		p.sendFileContent(stream, msg.CID, content, mimeType, rawData, false, nil)
 
 	case unixfs.TDirectory, unixfs.THAMTShard:
-		// Build directory entries
+		// Build directory entries for client display
 		dir, err := uio.NewHAMTDirectoryFromNode(p.manager.ipfsPeer, node)
 		if err != nil {
 			p.logVerbose(1, "handleGetFile: failed to create directory: %v", err)
@@ -2386,8 +2390,8 @@ func (p *Peer) handleGetFile(stream network.Stream) {
 			entries[link.Name] = link.Cid.String()
 		}
 
-		// Send directory content response
-		p.sendFileContent(stream, msg.CID, nil, "", true, entries)
+		// Send directory content response with raw node data for caching
+		p.sendFileContent(stream, msg.CID, nil, "", rawData, true, entries)
 
 	default:
 		p.logVerbose(1, "handleGetFile: unsupported file type")
@@ -2396,13 +2400,14 @@ func (p *Peer) handleGetFile(stream network.Stream) {
 }
 
 // sendFileContent sends a file content response (type 3) to the requesting peer
-func (p *Peer) sendFileContent(stream network.Stream, cidStr string, content []byte, mimeType string, isDirectory bool, entries map[string]string) {
-	p.logVerbose(2, "sendFileContent: sending response for CID=%s, isDirectory=%v", cidStr, isDirectory)
+func (p *Peer) sendFileContent(stream network.Stream, cidStr string, content []byte, mimeType string, rawNodeData []byte, isDirectory bool, entries map[string]string) {
+	p.logVerbose(2, "sendFileContent: sending response for CID=%s, isDirectory=%v, rawDataSize=%d", cidStr, isDirectory, len(rawNodeData))
 
 	// Create response message
 	response := map[string]any{
 		"cid":         cidStr,
 		"isDirectory": isDirectory,
+		"rawNode":     base64.StdEncoding.EncodeToString(rawNodeData), // Raw IPFS node data for caching
 	}
 
 	if isDirectory {
@@ -2520,12 +2525,65 @@ func (p *Peer) handleFileContent(stream network.Stream, originalCID string) {
 		return
 	}
 
+	// Get and decode raw IPFS node data for caching
+	rawNodeStr, ok := response["rawNode"].(string)
+	if !ok {
+		p.logVerbose(1, "handleFileContent: missing rawNode field in response")
+		if p.manager.onGotFile != nil {
+			p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": "missing node data in response"})
+		}
+		return
+	}
+
+	rawNodeData, err := base64.StdEncoding.DecodeString(rawNodeStr)
+	if err != nil {
+		p.logVerbose(1, "handleFileContent: failed to decode rawNode: %v", err)
+		if p.manager.onGotFile != nil {
+			p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": fmt.Sprintf("invalid node data: %v", err)})
+		}
+		return
+	}
+
+	// Parse the original CID
+	c, err := cid.Decode(originalCID)
+	if err != nil {
+		p.logVerbose(1, "handleFileContent: invalid CID %s: %v", originalCID, err)
+		if p.manager.onGotFile != nil {
+			p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": fmt.Sprintf("invalid CID: %v", err)})
+		}
+		return
+	}
+
+	// Create a block from raw data and CID, then add to blockstore
+	// This caches the IPFS node so it can be served to other peers
+	block, err := blocks.NewBlockWithCid(rawNodeData, c)
+	if err != nil {
+		p.logVerbose(1, "handleFileContent: failed to create block: %v", err)
+		if p.manager.onGotFile != nil {
+			p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": fmt.Sprintf("failed to create block: %v", err)})
+		}
+		return
+	}
+
+	// Add block to local IPFS blockstore
+	blockstore := p.manager.ipfsPeer.BlockStore()
+	err = blockstore.Put(p.ctx, block)
+	if err != nil {
+		p.logVerbose(1, "handleFileContent: failed to add block to IPFS: %v", err)
+		if p.manager.onGotFile != nil {
+			p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": fmt.Sprintf("failed to cache node: %v", err)})
+		}
+		return
+	}
+
+	p.logVerbose(2, "handleFileContent: cached node %s in local IPFS (%d bytes)", originalCID, len(rawNodeData))
+
 	// Check if directory
 	isDirectory, _ := response["isDirectory"].(bool)
 
 	if isDirectory {
-		// Directory content - forward directly to callback
-		p.logVerbose(2, "handleFileContent: received directory content")
+		// Directory content - forward to callback
+		p.logVerbose(2, "handleFileContent: directory successfully cached")
 		if p.manager.onGotFile != nil {
 			p.manager.onGotFile(p.peerID.String(), originalCID, true, map[string]any{
 				"type":    "directory",
@@ -2533,44 +2591,20 @@ func (p *Peer) handleFileContent(stream network.Stream, originalCID string) {
 			})
 		}
 	} else {
-		// File content - decode base64 and add to IPFS, then forward to callback
+		// File content - forward to callback
 		contentStr, ok := response["content"].(string)
 		if !ok {
-			p.logVerbose(1, "handleFileContent: missing or invalid content field")
+			p.logVerbose(1, "handleFileContent: missing content field for file")
 			if p.manager.onGotFile != nil {
 				p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": "missing content in response"})
 			}
 			return
 		}
 
-		// Decode base64 content
-		content, err := base64.StdEncoding.DecodeString(contentStr)
-		if err != nil {
-			p.logVerbose(1, "handleFileContent: failed to decode base64 content: %v", err)
-			if p.manager.onGotFile != nil {
-				p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": fmt.Sprintf("invalid content encoding: %v", err)})
-			}
-			return
-		}
-
-		// Add content to local IPFS node
-		p.logVerbose(2, "handleFileContent: adding %d bytes to local IPFS", len(content))
-		reader := bytes.NewReader(content)
-		node, err := p.manager.ipfsPeer.AddFile(p.ctx, reader, nil)
-		if err != nil {
-			p.logVerbose(1, "handleFileContent: failed to add content to IPFS: %v", err)
-			if p.manager.onGotFile != nil {
-				p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": fmt.Sprintf("failed to store file: %v", err)})
-			}
-			return
-		}
-
-		addedCID := node.Cid().String()
-		p.logVerbose(2, "handleFileContent: added to IPFS with CID=%s", addedCID)
-
 		// Get MIME type from response
 		mimeType, _ := response["mimeType"].(string)
 
+		p.logVerbose(2, "handleFileContent: file successfully cached")
 		// Forward to callback
 		if p.manager.onGotFile != nil {
 			p.manager.onGotFile(p.peerID.String(), originalCID, true, map[string]any{
@@ -2579,7 +2613,7 @@ func (p *Peer) handleFileContent(stream network.Stream, originalCID string) {
 				"content":  contentStr, // Send base64-encoded content to client
 			})
 		}
-
-		p.logVerbose(2, "handleFileContent: successfully retrieved and stored file %s", originalCID)
 	}
+
+	p.logVerbose(2, "handleFileContent: successfully retrieved and cached %s", originalCID)
 }

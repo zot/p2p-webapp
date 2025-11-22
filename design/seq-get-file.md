@@ -154,8 +154,12 @@ This sequence demonstrates file retrieval with an optional fallback mechanism. T
 
 - **Request Deduplication**: If multiple clients request the same CID simultaneously, only one IPFS request is made. All pending promises for that CID are resolved when the response arrives.
 - **Fallback Mechanism**: The fallback peer is only contacted if the file is not found in the local IPFS node. This ensures efficient use of network resources.
-- **Automatic Caching**: When a file is retrieved from a fallback peer, it's automatically added to the local IPFS node for future requests.
+- **Automatic IPFS Caching**: When a file or directory is retrieved from a fallback peer:
+  - The raw IPFS node data is transmitted in the response (`rawNode` field)
+  - The node is added to the local IPFS blockstore using `blocks.NewBlockWithCid()` and `blockstore.Put()`
+  - This makes the node available for subsequent requests from other peers
+  - Both files and directories are cached completely, enabling full IPFS node sharing
 - **Error Handling**: If the fallback peer doesn't have the file or an error occurs during retrieval, the original "not found" error is returned to the client.
 - **Protocol Messages**: Uses the reserved "p2p-webapp" protocol with message types:
   - Type 2: `getFile(cid)` - Request file from peer
-  - Type 3: `fileContent(cid, content, mimeType, ...)` - Send file content to requesting peer
+  - Type 3: `fileContent(cid, rawNode, content, mimeType, ...)` - Send file content and raw node data to requesting peer

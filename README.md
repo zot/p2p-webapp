@@ -239,6 +239,12 @@ if (fileContent.type === 'file') {
   }
 }
 
+// Get file with fallback peer (automatically cached in local IPFS)
+// If not found locally, request from fallbackPeerID
+// Once retrieved, this peer can serve it to other peers
+const fileFromPeer = await client.getFile(someCID, fallbackPeerID);
+// File/directory is now cached in local IPFS - other peers can request it from us!
+
 // Remove a file
 await client.removeFile('readme.txt');
 ```
@@ -876,9 +882,9 @@ A: This depends on network conditions and the IPFS/libp2p configuration. Small t
 | `unsubscribe(topic)`                      | Leave chat room                                                               |
 | `stop(protocol)`                          | Stop listening for direct messages                                            |
 | `listFiles(peerID)`                       | List files for a peer (returns {rootCID, entries})                            |
-| `getFile(cid, fallbackPeerID?)`           | Get file/directory by CID, optionally from fallback peer if not found locally |
+| `getFile(cid, fallbackPeerID?)`           | Get file/directory by CID, optionally from fallback peer; automatically caches in local IPFS |
 | `storeFile(path, content)`*               | Store file (content as string or Uint8Array), returns {fileCid, rootCid}      |
-| `createDirectory(path)`*                  | Create directory, returns {fileCid, rootCid}                                   |
+| `createDirectory(path)`*                  | Create directory, returns {fileCid, rootCid}                                  |
 | `removeFile(path)`*                       | Remove a file from this peer's storage                                        |
 | `close()`                                 | Disconnect                                                                    |
 

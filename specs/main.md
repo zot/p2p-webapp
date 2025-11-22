@@ -439,7 +439,8 @@ Example entries object:
 - Returns Promise that resolves with file content or rejects on error
 - **Optional fallback**: If `fallbackPeerID` is provided and the file cannot be found locally in IPFS, the server will request the file from the specified peer using the reserved `p2p-webapp` protocol
   - If the fallback peer has the file, it will be retrieved and returned to the client
-  - The file is automatically added to this peer's IPFS node when received
+  - **IPFS Caching**: The complete IPFS node (file or directory) is automatically cached in this peer's local IPFS blockstore when received, making it available for other peers to request
+  - Cached nodes can be served to other peers via both the fallback mechanism and standard IPFS retrieval
   - If the fallback peer doesn't have the file or an error occurs, the original "not found" error is returned
 - Content format for files:
   - `{type: "file", mimeType: string, content: string}` (content is base64-encoded)
@@ -457,16 +458,27 @@ Libp2p messaging in this section uses the reserved libp2p peer messaging protoco
    - Open stream to fallback peer using reserved `p2p-webapp` protocol
    - Send `getFile(cid)` message (type 2) to the fallback peer
    - Wait for `fileContent` response (type 3) from fallback peer
-   - If successful, add the received content to local IPFS and return via `gotFile` server message
+   - If successful:
+     - Extract the raw IPFS node data from the response
+     - Create a block using `blocks.NewBlockWithCid(rawData, cid)`
+     - Add block to local IPFS blockstore using `blockstore.Put(ctx, block)`
+     - This caches the node so it can be served to other peers
+     - Return content via `gotFile` server message
    - If fallback fails, return original error via `gotFile` server message
 4. If file not found and no fallback provided, return error via `gotFile` server message
 
 ### Reserved protocol messages
 - **Type 2: GetFile request** - Request file content by CID from another peer
   - Payload: JSON `{cid: string}`
-- **Type 3: File response** - Return file content to requesting peer
-  - Payload: JSON `{cid: string, content: base64string, mimeType: string, isDirectory: bool, entries: {...}}` for success
-  - Or: JSON `{error: string}` for errors
+- **Type 3: FileContent response** - Return file content to requesting peer
+  - Success payload: JSON object with:
+    - `cid`: The requested CID
+    - `rawNode`: Base64-encoded raw IPFS node data for caching (both files and directories)
+    - `isDirectory`: Boolean indicating if this is a directory
+    - For files: `content` (base64-encoded file content), `mimeType`
+    - For directories: `entries` (object mapping pathname to CID)
+  - Error payload: JSON `{cid: string, error: string}`
+  - The `rawNode` field contains the complete IPFS block data, enabling the requesting peer to cache the node in its local blockstore
 
 ### Response: null or error (promise resolution handled by client library)
 
