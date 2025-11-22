@@ -434,15 +434,40 @@ Example entries object:
 }
 ```
 
-## getFile(cid: string): Promise<FileContent>
+## getFile(cid: string, fallbackPeerID?: string): Promise<FileContent>
 - Get IPFS content by CID
 - Returns Promise that resolves with file content or rejects on error
+- **Optional fallback**: If `fallbackPeerID` is provided and the file cannot be found locally in IPFS, the server will request the file from the specified peer using the reserved `p2p-webapp` protocol
+  - If the fallback peer has the file, it will be retrieved and returned to the client
+  - The file is automatically added to this peer's IPFS node when received
+  - If the fallback peer doesn't have the file or an error occurs, the original "not found" error is returned
 - Content format for files:
   - `{type: "file", mimeType: string, content: string}` (content is base64-encoded)
   - **Why base64?** Binary files (images, PDFs, executables) contain arbitrary bytes that aren't valid UTF-8. JSON can only safely encode UTF-8 strings, so base64 encoding is required to transmit binary data without corruption.
 - Content format for directories:
   - `{type: "directory", entries: {PATHNAME: CID, ...}}`
 - Internally sends a server message `gotFile(cid, {success: bool, content})` which the client library uses to resolve/reject the promise
+
+### Go code
+Libp2p messaging in this section uses the reserved libp2p peer messaging protocol named `p2p-webapp`.
+
+1. Try to get the file from local IPFS node using `ipfsPeer.Get(ctx, cid)`
+2. If successful, process the file content and return via `gotFile` server message
+3. If file not found locally AND `fallbackPeerID` is provided:
+   - Open stream to fallback peer using reserved `p2p-webapp` protocol
+   - Send `getFile(cid)` message (type 2) to the fallback peer
+   - Wait for `fileContent` response (type 3) from fallback peer
+   - If successful, add the received content to local IPFS and return via `gotFile` server message
+   - If fallback fails, return original error via `gotFile` server message
+4. If file not found and no fallback provided, return error via `gotFile` server message
+
+### Reserved protocol messages
+- **Type 2: GetFile request** - Request file content by CID from another peer
+  - Payload: JSON `{cid: string}`
+- **Type 3: File response** - Return file content to requesting peer
+  - Payload: JSON `{cid: string, content: base64string, mimeType: string, isDirectory: bool, entries: {...}}` for success
+  - Or: JSON `{error: string}` for errors
+
 ### Response: null or error (promise resolution handled by client library)
 
 ## storeFile(path: string, content: string | Uint8Array)

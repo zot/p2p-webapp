@@ -59,7 +59,7 @@ type PeerOperations interface {
 
 	// File operations
 	ListFiles(targetPeerID string) error
-	GetFile(cidStr string) error
+	GetFile(cidStr, fallbackPeerID string) error
 	StoreFile(filepath string, content []byte, directory bool) (string, string, error)
 	RemoveFile(filepath string) error
 }
@@ -1395,7 +1395,10 @@ func (p *Peer) ListFiles(targetPeerID string) error {
 
 // GetFile retrieves file or directory content from IPFS (async, uses onGotFile callback)
 // CRC: crc-Peer.md
-func (p *Peer) GetFile(cidStr string) error {
+// Spec: main.md
+// CRC: crc-Peer.md
+// Sequence: seq-get-file.md
+func (p *Peer) GetFile(cidStr, fallbackPeerID string) error {
 	if p.manager.ipfsPeer == nil {
 		return fmt.Errorf("IPFS peer not initialized")
 	}
@@ -1410,6 +1413,19 @@ func (p *Peer) GetFile(cidStr string) error {
 		// Get node from IPFS
 		node, err := p.manager.ipfsPeer.Get(p.ctx, c)
 		if err != nil {
+			// File not found locally - try fallback peer if provided
+			if fallbackPeerID != "" {
+				p.logVerbose(2, "File %s not found locally, trying fallback peer %s", cidStr, fallbackPeerID)
+				if err := p.requestFileFromPeer(cidStr, fallbackPeerID); err != nil {
+					p.logVerbose(1, "Failed to get file from fallback peer: %v", err)
+					if p.manager.onGotFile != nil {
+						p.manager.onGotFile(p.peerID.String(), cidStr, false, map[string]any{"error": err.Error()})
+					}
+				}
+				// requestFileFromPeer will handle the callback when it receives the response
+				return
+			}
+			// No fallback peer, return error
 			if p.manager.onGotFile != nil {
 				p.manager.onGotFile(p.peerID.String(), cidStr, false, map[string]any{"error": err.Error()})
 			}
@@ -1679,6 +1695,61 @@ func (p *Peer) StoreFile(filepath string, content []byte, directory bool) (strin
 	p.publishFileUpdateNotification()
 
 	return resultCID, newRootCID.String(), nil
+}
+
+// requestFileFromPeer requests a file from a fallback peer using the reserved p2p-webapp protocol
+// Spec: main.md
+// CRC: crc-Peer.md
+// Sequence: seq-get-file.md
+func (p *Peer) requestFileFromPeer(cidStr, fallbackPeerID string) error {
+	p.logVerbose(2, "Requesting file %s from peer %s", cidStr, fallbackPeerID)
+
+	// Decode peer ID
+	targetPeer, err := peer.Decode(fallbackPeerID)
+	if err != nil {
+		p.logVerbose(1, "Invalid fallback peer ID %s: %v", fallbackPeerID, err)
+		return fmt.Errorf("invalid peer ID: %w", err)
+	}
+
+	// Open stream to fallback peer
+	p.logVerbose(2, "Opening stream to fallback peer %s", fallbackPeerID)
+	stream, err := p.host.NewStream(p.ctx, targetPeer, protocol.ID(P2PWebAppProtocol))
+	if err != nil {
+		p.logVerbose(1, "Failed to open stream to fallback peer %s: %v", fallbackPeerID, err)
+		return fmt.Errorf("failed to open stream: %w", err)
+	}
+
+	p.logVerbose(2, "Sending GetFile message (type 2) for CID %s to %s", cidStr, fallbackPeerID)
+
+	// Send message type (2 = GetFile)
+	if _, err := stream.Write([]byte{2}); err != nil {
+		stream.Close()
+		p.logVerbose(1, "Failed to write GetFile message type: %v", err)
+		return fmt.Errorf("failed to write message type: %w", err)
+	}
+
+	// Send CID as JSON
+	msg := map[string]string{"cid": cidStr}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		stream.Close()
+		return fmt.Errorf("failed to marshal GetFile message: %w", err)
+	}
+
+	if err := writeMessage(stream, data); err != nil {
+		stream.Close()
+		p.logVerbose(1, "Failed to write GetFile message data: %v", err)
+		return fmt.Errorf("failed to write message: %w", err)
+	}
+
+	// Spawn goroutine to handle response
+	go func() {
+		defer stream.Close()
+		p.logVerbose(2, "Waiting for file content response from %s", fallbackPeerID)
+		p.handleFileContent(stream, cidStr)
+	}()
+
+	return nil
 }
 
 // RemoveFile removes a file or directory from the peer's HAMTDirectory
@@ -1997,7 +2068,7 @@ func (m *Manager) Bootstrap(peerID, bootstrapAddr string) error {
 func (p *Peer) handleP2PWebAppStream(stream network.Stream) {
 	defer stream.Close()
 
-	// Read message type (first byte: 0 = GetFileList, 1 = FileList)
+	// Read message type (first byte: 0 = GetFileList, 1 = FileList, 2 = GetFile, 3 = FileContent)
 	msgType := make([]byte, 1)
 	if _, err := io.ReadFull(stream, msgType); err != nil {
 		return
@@ -2008,6 +2079,12 @@ func (p *Peer) handleP2PWebAppStream(stream network.Stream) {
 		p.handleGetFileList(stream)
 	case 1: // FileList
 		p.handleFileList(stream)
+	case 2: // GetFile
+		p.handleGetFile(stream)
+	case 3: // FileContent
+		// Type 3 is handled by handleFileContent which is called from requestFileFromPeer
+		// This case should not be reached in normal flow
+		p.logVerbose(1, "handleP2PWebAppStream: unexpected FileContent message (type 3)")
 	}
 }
 
@@ -2209,5 +2286,300 @@ func (p *Peer) handleFileList(stream network.Stream) {
 
 		// Call onPeerFiles callback
 		go onPeerFiles(p.peerID.String(), senderPeerID, msg.CID, anyEntries)
+	}
+}
+
+// handleGetFile processes a file request from another peer and sends back the file content
+// Spec: main.md
+// CRC: crc-Peer.md
+// Sequence: seq-get-file.md
+func (p *Peer) handleGetFile(stream network.Stream) {
+	requesterPeerID := stream.Conn().RemotePeer().String()
+	p.logVerbose(2, "handleGetFile: received request from %s", requesterPeerID)
+
+	// Read JSON data containing CID
+	data, err := readMessage(stream)
+	if err != nil {
+		p.logVerbose(1, "handleGetFile: failed to read message: %v", err)
+		return
+	}
+
+	// Parse GetFile message
+	var msg struct {
+		CID string `json:"cid"`
+	}
+	if err := json.Unmarshal(data, &msg); err != nil {
+		p.logVerbose(1, "handleGetFile: failed to unmarshal message: %v", err)
+		return
+	}
+
+	p.logVerbose(2, "handleGetFile: requested CID=%s", msg.CID)
+
+	// Decode CID
+	c, err := cid.Decode(msg.CID)
+	if err != nil {
+		p.logVerbose(1, "handleGetFile: invalid CID %s: %v", msg.CID, err)
+		// Send error response
+		p.sendFileError(stream, msg.CID, fmt.Sprintf("invalid CID: %v", err))
+		return
+	}
+
+	// Get node from IPFS
+	node, err := p.manager.ipfsPeer.Get(p.ctx, c)
+	if err != nil {
+		p.logVerbose(1, "handleGetFile: failed to get CID %s: %v", msg.CID, err)
+		// Send error response
+		p.sendFileError(stream, msg.CID, fmt.Sprintf("file not found: %v", err))
+		return
+	}
+
+	// Check node type
+	fsNode, err := unixfs.ExtractFSNode(node)
+	if err != nil {
+		p.logVerbose(1, "handleGetFile: failed to extract FS node: %v", err)
+		p.sendFileError(stream, msg.CID, fmt.Sprintf("failed to extract node: %v", err))
+		return
+	}
+
+	switch fsNode.Type() {
+	case unixfs.TFile:
+		// Read file content
+		reader, err := uio.NewDagReader(p.ctx, node, p.manager.ipfsPeer)
+		if err != nil {
+			p.logVerbose(1, "handleGetFile: failed to create reader: %v", err)
+			p.sendFileError(stream, msg.CID, fmt.Sprintf("failed to read file: %v", err))
+			return
+		}
+		defer reader.Close()
+
+		content, err := io.ReadAll(reader)
+		if err != nil {
+			p.logVerbose(1, "handleGetFile: failed to read content: %v", err)
+			p.sendFileError(stream, msg.CID, fmt.Sprintf("failed to read content: %v", err))
+			return
+		}
+
+		// Detect MIME type
+		mimeType := http.DetectContentType(content)
+
+		// Send file content response
+		p.sendFileContent(stream, msg.CID, content, mimeType, false, nil)
+
+	case unixfs.TDirectory, unixfs.THAMTShard:
+		// Build directory entries
+		dir, err := uio.NewHAMTDirectoryFromNode(p.manager.ipfsPeer, node)
+		if err != nil {
+			p.logVerbose(1, "handleGetFile: failed to create directory: %v", err)
+			p.sendFileError(stream, msg.CID, fmt.Sprintf("failed to read directory: %v", err))
+			return
+		}
+
+		entries := make(map[string]string)
+		links, err := dir.Links(p.ctx)
+		if err != nil {
+			p.logVerbose(1, "handleGetFile: failed to get links: %v", err)
+			p.sendFileError(stream, msg.CID, fmt.Sprintf("failed to read directory: %v", err))
+			return
+		}
+
+		for _, link := range links {
+			entries[link.Name] = link.Cid.String()
+		}
+
+		// Send directory content response
+		p.sendFileContent(stream, msg.CID, nil, "", true, entries)
+
+	default:
+		p.logVerbose(1, "handleGetFile: unsupported file type")
+		p.sendFileError(stream, msg.CID, "unsupported file type")
+	}
+}
+
+// sendFileContent sends a file content response (type 3) to the requesting peer
+func (p *Peer) sendFileContent(stream network.Stream, cidStr string, content []byte, mimeType string, isDirectory bool, entries map[string]string) {
+	p.logVerbose(2, "sendFileContent: sending response for CID=%s, isDirectory=%v", cidStr, isDirectory)
+
+	// Create response message
+	response := map[string]any{
+		"cid":         cidStr,
+		"isDirectory": isDirectory,
+	}
+
+	if isDirectory {
+		response["entries"] = entries
+	} else {
+		response["content"] = base64.StdEncoding.EncodeToString(content)
+		response["mimeType"] = mimeType
+	}
+
+	// Marshal to JSON
+	data, err := json.Marshal(response)
+	if err != nil {
+		p.logVerbose(1, "sendFileContent: failed to marshal response: %v", err)
+		return
+	}
+
+	// Send message type (3 = FileContent)
+	if _, err := stream.Write([]byte{3}); err != nil {
+		p.logVerbose(1, "sendFileContent: failed to write message type: %v", err)
+		return
+	}
+
+	// Send JSON data
+	if err := writeMessage(stream, data); err != nil {
+		p.logVerbose(1, "sendFileContent: failed to write message data: %v", err)
+		return
+	}
+
+	p.logVerbose(2, "sendFileContent: successfully sent file content for %s", cidStr)
+}
+
+// sendFileError sends an error response (type 3 with error field) to the requesting peer
+func (p *Peer) sendFileError(stream network.Stream, cidStr, errorMsg string) {
+	p.logVerbose(2, "sendFileError: sending error for CID=%s: %s", cidStr, errorMsg)
+
+	// Create error response
+	response := map[string]string{
+		"cid":   cidStr,
+		"error": errorMsg,
+	}
+
+	// Marshal to JSON
+	data, err := json.Marshal(response)
+	if err != nil {
+		p.logVerbose(1, "sendFileError: failed to marshal error response: %v", err)
+		return
+	}
+
+	// Send message type (3 = FileContent/Error)
+	if _, err := stream.Write([]byte{3}); err != nil {
+		p.logVerbose(1, "sendFileError: failed to write message type: %v", err)
+		return
+	}
+
+	// Send JSON data
+	if err := writeMessage(stream, data); err != nil {
+		p.logVerbose(1, "sendFileError: failed to write message data: %v", err)
+		return
+	}
+
+	p.logVerbose(2, "sendFileError: successfully sent error response")
+}
+
+// handleFileContent processes a file content response from a fallback peer
+// Spec: main.md
+// CRC: crc-Peer.md
+// Sequence: seq-get-file.md
+func (p *Peer) handleFileContent(stream network.Stream, originalCID string) {
+	p.logVerbose(2, "handleFileContent: waiting for response for CID=%s", originalCID)
+
+	// Read message type (should be 3 = FileContent)
+	msgType := make([]byte, 1)
+	if _, err := io.ReadFull(stream, msgType); err != nil {
+		p.logVerbose(1, "handleFileContent: failed to read message type: %v", err)
+		if p.manager.onGotFile != nil {
+			p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": fmt.Sprintf("failed to read response: %v", err)})
+		}
+		return
+	}
+
+	if msgType[0] != 3 {
+		p.logVerbose(1, "handleFileContent: expected message type 3 (FileContent), got %d", msgType[0])
+		if p.manager.onGotFile != nil {
+			p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": "invalid response type"})
+		}
+		return
+	}
+
+	// Read JSON data
+	data, err := readMessage(stream)
+	if err != nil {
+		p.logVerbose(1, "handleFileContent: failed to read message: %v", err)
+		if p.manager.onGotFile != nil {
+			p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": fmt.Sprintf("failed to read response: %v", err)})
+		}
+		return
+	}
+
+	// Parse response
+	var response map[string]any
+	if err := json.Unmarshal(data, &response); err != nil {
+		p.logVerbose(1, "handleFileContent: failed to unmarshal response: %v", err)
+		if p.manager.onGotFile != nil {
+			p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": fmt.Sprintf("invalid response: %v", err)})
+		}
+		return
+	}
+
+	// Check for error in response
+	if errMsg, ok := response["error"].(string); ok {
+		p.logVerbose(1, "handleFileContent: received error from fallback peer: %s", errMsg)
+		if p.manager.onGotFile != nil {
+			p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": errMsg})
+		}
+		return
+	}
+
+	// Check if directory
+	isDirectory, _ := response["isDirectory"].(bool)
+
+	if isDirectory {
+		// Directory content - forward directly to callback
+		p.logVerbose(2, "handleFileContent: received directory content")
+		if p.manager.onGotFile != nil {
+			p.manager.onGotFile(p.peerID.String(), originalCID, true, map[string]any{
+				"type":    "directory",
+				"entries": response["entries"],
+			})
+		}
+	} else {
+		// File content - decode base64 and add to IPFS, then forward to callback
+		contentStr, ok := response["content"].(string)
+		if !ok {
+			p.logVerbose(1, "handleFileContent: missing or invalid content field")
+			if p.manager.onGotFile != nil {
+				p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": "missing content in response"})
+			}
+			return
+		}
+
+		// Decode base64 content
+		content, err := base64.StdEncoding.DecodeString(contentStr)
+		if err != nil {
+			p.logVerbose(1, "handleFileContent: failed to decode base64 content: %v", err)
+			if p.manager.onGotFile != nil {
+				p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": fmt.Sprintf("invalid content encoding: %v", err)})
+			}
+			return
+		}
+
+		// Add content to local IPFS node
+		p.logVerbose(2, "handleFileContent: adding %d bytes to local IPFS", len(content))
+		reader := bytes.NewReader(content)
+		node, err := p.manager.ipfsPeer.AddFile(p.ctx, reader, nil)
+		if err != nil {
+			p.logVerbose(1, "handleFileContent: failed to add content to IPFS: %v", err)
+			if p.manager.onGotFile != nil {
+				p.manager.onGotFile(p.peerID.String(), originalCID, false, map[string]any{"error": fmt.Sprintf("failed to store file: %v", err)})
+			}
+			return
+		}
+
+		addedCID := node.Cid().String()
+		p.logVerbose(2, "handleFileContent: added to IPFS with CID=%s", addedCID)
+
+		// Get MIME type from response
+		mimeType, _ := response["mimeType"].(string)
+
+		// Forward to callback
+		if p.manager.onGotFile != nil {
+			p.manager.onGotFile(p.peerID.String(), originalCID, true, map[string]any{
+				"type":     "file",
+				"mimeType": mimeType,
+				"content":  contentStr, // Send base64-encoded content to client
+			})
+		}
+
+		p.logVerbose(2, "handleFileContent: successfully retrieved and stored file %s", originalCID)
 	}
 }

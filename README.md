@@ -440,8 +440,9 @@ async function refreshFileList(peerID: string) {
 }
 
 // Download a file from another peer
-async function downloadFile(cid: string, filename: string) {
-  const content = await client.getFile(cid);
+// If file not in local IPFS, request it from the peer who has it
+async function downloadFile(cid: string, filename: string, peerIDWhoHasIt?: string) {
+  const content = await client.getFile(cid, peerIDWhoHasIt);
   if (content.type === 'file') {
     // Convert base64 to blob and download
     const bytes = Uint8Array.from(atob(content.content), c => c.charCodeAt(0));
@@ -875,7 +876,7 @@ A: This depends on network conditions and the IPFS/libp2p configuration. Small t
 | `unsubscribe(topic)`                      | Leave chat room                                                               |
 | `stop(protocol)`                          | Stop listening for direct messages                                            |
 | `listFiles(peerID)`                       | List files for a peer (returns {rootCID, entries})                            |
-| `getFile(cid)`                            | Get file or directory content by CID                                          |
+| `getFile(cid, fallbackPeerID?)`           | Get file/directory by CID, optionally from fallback peer if not found locally |
 | `storeFile(path, content)`*               | Store file (content as string or Uint8Array), returns {fileCid, rootCid}      |
 | `createDirectory(path)`*                  | Create directory, returns {fileCid, rootCid}                                   |
 | `removeFile(path)`*                       | Remove a file from this peer's storage                                        |

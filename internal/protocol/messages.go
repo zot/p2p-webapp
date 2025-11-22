@@ -144,7 +144,8 @@ type ListFilesRequest struct {
 
 // GetFileRequest requests file content by CID (async, result via gotFile server message)
 type GetFileRequest struct {
-	CID string `json:"cid"`
+	CID            string `json:"cid"`
+	FallbackPeerID string `json:"fallbackPeerID,omitempty"` // Optional peer to request from if not found locally
 }
 
 // StoreFileRequest stores file or directory content

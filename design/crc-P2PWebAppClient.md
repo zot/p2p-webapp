@@ -27,7 +27,7 @@
 - unsubscribe: Unsubscribe from topic
 - listPeers: Get peers subscribed to topic
 - listFiles: Request file list from peer (returns promise, manages deduplication and handler pattern for async peerFiles server message)
-- getFile: Request IPFS content by CID (triggers gotFile server message with {success, content})
+- getFile: Request IPFS content by CID with optional fallbackPeerID (triggers gotFile server message with {success, content})
 - storeFile: Store file with signature storeFile(path, content) where content is string or Uint8Array, returns promise resolving to StoreFileResponse {fileCid, rootCid}
 - createDirectory: Create directory with signature createDirectory(path), returns promise resolving to StoreFileResponse {fileCid, rootCid}
 - removeFile: Remove file or directory from this peer's directory (implicit peerID)
@@ -53,4 +53,5 @@
 - seq-client-pubsub.md: Topic subscription and publishing
 - seq-client-ack.md: Message delivery confirmation flow
 - seq-list-files.md: File list request with deduplication
+- seq-get-file.md: File retrieval with optional fallback peer
 - seq-store-file.md: File storage on own peer

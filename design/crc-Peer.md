@@ -30,12 +30,14 @@
 - monitor: Start monitoring topic for peer join/leave events
 - stopMonitor: Stop monitoring topic
 - listFiles: Request file list from target peer (local or remote via p2p-webapp protocol)
-- getFile: Retrieve IPFS content by CID
+- getFile: Retrieve IPFS content by CID, with optional fallback peer to request from if not found locally (uses p2p-webapp protocol)
 - storeFile: Create file/directory node in IPFS, update HAMTDirectory at path, return file CID and root CID (StoreFileResponse), publish file update notification if configured (handles both storeFile and createDirectory operations)
 - removeFile: Remove file or directory from HAMTDirectory at path, publish file update notification if configured
 - publishFileUpdateNotification: Publish file change notification to configured topic (if subscribed)
-- handleGetFileList: Handle incoming getFileList() message on p2p-webapp protocol
-- handleFileList: Handle incoming fileList(CID, directory) message on p2p-webapp protocol
+- handleGetFileList: Handle incoming getFileList() message (type 0) on p2p-webapp protocol
+- handleFileList: Handle incoming fileList() message (type 1) on p2p-webapp protocol
+- handleGetFile: Handle incoming getFile() message (type 2) on p2p-webapp protocol - retrieve and send file content
+- handleFileContent: Handle incoming fileContent() message (type 3) on p2p-webapp protocol - receive file from fallback peer
 
 ## Collaborators
 
@@ -52,4 +54,5 @@
 - seq-protocol-communication.md: Protocol-based peer-to-peer messaging
 - seq-pubsub-communication.md: Topic subscribe/publish flow
 - seq-list-files.md: File list retrieval (local and remote)
+- seq-get-file.md: File retrieval with optional fallback peer
 - seq-store-file.md: File/directory storage in peer directory

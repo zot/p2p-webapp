@@ -75,7 +75,7 @@ export declare class P2PWebAppClient {
      * @param cid Content identifier
      * @returns Promise resolving with file content or rejecting on error
      */
-    getFile(cid: string): Promise<FileContent>;
+    getFile(cid: string, fallbackPeerID?: string): Promise<FileContent>;
     /**
      * Store file for this peer
      * @param path File path identifier

@@ -276,7 +276,7 @@ func (h *Handler) handleGetFile(msg *Message, peerID string) (*Message, error) {
 	}
 
 	// Async operation - actual result comes via gotFile server message
-	if err := peer.GetFile(req.CID); err != nil {
+	if err := peer.GetFile(req.CID, req.FallbackPeerID); err != nil {
 		return h.errorResponse(msg.RequestID, 500, err.Error())
 	}
 

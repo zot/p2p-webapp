@@ -210,7 +210,7 @@ export class P2PWebAppClient {
    * @param cid Content identifier
    * @returns Promise resolving with file content or rejecting on error
    */
-  async getFile(cid: string): Promise<FileContent> {
+  async getFile(cid: string, fallbackPeerID?: string): Promise<FileContent> {
     // Check if there's already a pending request for this CID
     if (this.getFilePending.has(cid)) {
       // Wait for existing request to complete
@@ -229,7 +229,11 @@ export class P2PWebAppClient {
     this.getFilePending.set(cid, { promise, resolve: resolveFunc!, reject: rejectFunc! });
 
     // Send request (actual result comes via gotFile server message)
-    await this.sendRequest('getfile', { cid });
+    const params: any = { cid };
+    if (fallbackPeerID) {
+      params.fallbackPeerID = fallbackPeerID;
+    }
+    await this.sendRequest('getfile', params);
 
     return promise;
   }
