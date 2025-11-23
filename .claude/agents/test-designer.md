@@ -1,5 +1,8 @@
 ---
-type: agent
+name: test-designer
+description: Generate Level 2 test design specifications from CRC cards and sequence diagrams. Creates design/test-*.md files with comprehensive test specifications for all components.
+tools: Read, Write, Glob, Grep
+model: sonnet
 ---
 
 # Test Designer Agent

@@ -35,7 +35,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 	discoveryrouting "github.com/libp2p/go-libp2p/p2p/discovery/routing"
-	ncon "github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -346,9 +345,6 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create host: %w", err)
 	}
-
-	bc, _ := h.ConnManager().(*ncon.BasicConnMgr)
-	fmt.Printf("ConnManager: %#v\n", bc.GetInfo())
 
 	// Bootstrap DHT with IPFS nodes for global discovery (async to avoid blocking peer creation)
 	if kdht != nil {

@@ -106,11 +106,13 @@ Source file references have directory names:
    ↓
 11. UPDATE design/traceability.md (Level 1↔2, Level 2↔3 with checkboxes)
    ↓
-12. RUN test-designer agent to generate test design specs
+12. **MUST RUN test-designer agent** to generate test design specs (MANDATORY)
    ↓
-13. RUN gap-analyzer agent for comprehensive analysis
+13. VERIFY test design files created (design/test-*.md exist)
    ↓
-14. REVIEW quality checklist
+14. RUN gap-analyzer agent for comprehensive analysis
+   ↓
+15. REVIEW quality checklist (including test design validation)
 ```
 
 ## Part 1: CRC Card Creation
@@ -1183,7 +1185,7 @@ Task(
 4. **Create architecture.md as design entry point** - Map all design elements to logical systems and cross-cutting concerns. This is the "main program" for the design.
 5. **Maintain traceability** - Every artifact links to its source
 6. **Keep UI specs terse** - Scannable lists, ASCII art, minimal prose
-7. **Invoke test-designer agent** - After creating CRC cards and sequences, automatically invoke test-designer agent to generate Level 2 test specifications (design/test-*.md). This is part of the standard design workflow.
+7. **MUST invoke test-designer agent** - After creating CRC cards and sequences, you MUST invoke test-designer agent to generate Level 2 test specifications (design/test-*.md). This is MANDATORY, not optional. Verify that test design files were created before proceeding.
 8. **Use gap-analyzer agent** - Don't manually write gap analysis
 9. **Follow naming conventions** - Consistent file naming across all specs
-10. **Complete quality checklist** - Verify all items before finishing
+10. **Complete quality checklist** - Verify all items before finishing, including test design file existence
