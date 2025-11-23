@@ -128,6 +128,20 @@ export class P2PWebAppClient {
         return response.peers || [];
     }
     /**
+     * Protect and tag peer connections to ensure they remain active
+     * @param peerIds Array of peer IDs to protect
+     */
+    async addPeers(peerIds) {
+        await this.sendRequest('addpeers', { peerIds });
+    }
+    /**
+     * Unprotect and untag peer connections
+     * @param peerIds Array of peer IDs to unprotect
+     */
+    async removePeers(peerIds) {
+        await this.sendRequest('removepeers', { peerIds });
+    }
+    /**
      * List files for a peer
      * @param peerid Peer ID whose files to list
      * @returns Promise resolving with {rootCID, entries}

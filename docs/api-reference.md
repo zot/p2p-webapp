@@ -32,7 +32,7 @@ This copies:
 ### Import
 
 ```typescript
-import { connect, start, stop, send, subscribe, publish, unsubscribe, listPeers, listFiles, getFile, storeFile, createDirectory, removeFile } from './client.js';
+import { connect, start, stop, send, subscribe, publish, unsubscribe, listPeers, addPeers, removePeers, listFiles, getFile, storeFile, createDirectory, removeFile } from './client.js';
 ```
 
 Or with named export:
@@ -313,6 +313,58 @@ console.log(`${peers.length} peers in room:`, peers);
 - Returns current snapshot (may change immediately)
 - Use `onPeerChange` callback for live updates
 - Includes self in peer list
+
+---
+
+### Connection Management API
+
+These methods allow explicit management of peer connection priorities using libp2p's BasicConnMgr. While p2p-webapp automatically discovers peers via mDNS and DHT, these methods let you protect critical connections from being closed and assign priority values.
+
+#### `addPeers(peerIds: string[]): Promise<void>`
+
+Protect and tag peer connections to ensure they remain active.
+
+**Parameters**:
+- `peerIds` - Array of peer IDs to protect
+
+**Returns**: Promise resolving when complete
+
+**Example**:
+```typescript
+// Protect connections to important peers
+await addPeers(['12D3KooW...', '12D3KooX...']);
+```
+
+**Notes**:
+- Calls `ConnManager().Protect(peerID, "connected")` to prevent connection pruning
+- Calls `ConnManager().TagPeer(peerID, "connected", 100)` to assign priority value
+- Attempts to connect to peers if not already connected (best-effort)
+- Silently skips invalid peer IDs or connection failures
+- Useful for maintaining connections to relay nodes or critical application peers
+
+---
+
+#### `removePeers(peerIds: string[]): Promise<void>`
+
+Unprotect and untag peer connections to allow normal connection management.
+
+**Parameters**:
+- `peerIds` - Array of peer IDs to unprotect
+
+**Returns**: Promise resolving when complete
+
+**Example**:
+```typescript
+// Remove protection from peers
+await removePeers(['12D3KooW...', '12D3KooX...']);
+```
+
+**Notes**:
+- Calls `ConnManager().Unprotect(peerID, "connected")` to allow connection pruning
+- Calls `ConnManager().UntagPeer(peerID, "connected")` to remove priority tag
+- Does NOT disconnect peers, only removes protection and priority
+- Silently skips invalid peer IDs
+- Connections may be closed later by the connection manager if resources are constrained
 
 ---
 
@@ -815,6 +867,58 @@ Or error:
   "result": ["12D3KooW...", "12D3KooX...", "12D3KooY..."]
 }
 ```
+
+---
+
+#### addPeers
+
+**Command**: `"addPeers"`
+
+**Args**: `[peerIds]`
+- `peerIds` (string[]) - Array of peer IDs to protect and tag
+
+**Response**: `null`
+
+**Example**:
+```json
+{
+  "requestID": 8,
+  "command": "addPeers",
+  "args": [["12D3KooW...", "12D3KooX..."]]
+}
+```
+
+**Notes**:
+- Protects connections from being closed by connection manager
+- Tags peers with priority value 100
+- Attempts connection if not already connected
+- Silently skips invalid peer IDs
+
+---
+
+#### removePeers
+
+**Command**: `"removePeers"`
+
+**Args**: `[peerIds]`
+- `peerIds` (string[]) - Array of peer IDs to unprotect and untag
+
+**Response**: `null`
+
+**Example**:
+```json
+{
+  "requestID": 9,
+  "command": "removePeers",
+  "args": [["12D3KooW...", "12D3KooX..."]]
+}
+```
+
+**Notes**:
+- Removes protection from connections
+- Removes priority tags
+- Does NOT disconnect peers
+- Silently skips invalid peer IDs
 
 ---
 

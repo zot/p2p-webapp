@@ -60,6 +60,16 @@ export declare class P2PWebAppClient {
      */
     listPeers(topic: string): Promise<string[]>;
     /**
+     * Protect and tag peer connections to ensure they remain active
+     * @param peerIds Array of peer IDs to protect
+     */
+    addPeers(peerIds: string[]): Promise<void>;
+    /**
+     * Unprotect and untag peer connections
+     * @param peerIds Array of peer IDs to unprotect
+     */
+    removePeers(peerIds: string[]): Promise<void>;
+    /**
      * List files for a peer
      * @param peerid Peer ID whose files to list
      * @returns Promise resolving with {rootCID, entries}

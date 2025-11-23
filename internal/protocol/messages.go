@@ -86,6 +86,20 @@ type ListPeersResponse struct {
 	Peers []string `json:"peers"`
 }
 
+// AddPeersRequest protects and tags peer connections
+// CRC: crc-Peer.md
+// Sequence: seq-add-peers.md
+type AddPeersRequest struct {
+	PeerIDs []string `json:"peerIds"`
+}
+
+// RemovePeersRequest unprotects and untags peer connections
+// CRC: crc-Peer.md
+// Sequence: seq-remove-peers.md
+type RemovePeersRequest struct {
+	PeerIDs []string `json:"peerIds"`
+}
+
 // Server Request Messages (sent from server to client)
 
 // PeerDataRequest delivers data from a peer on a protocol

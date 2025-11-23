@@ -35,6 +35,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 	discoveryrouting "github.com/libp2p/go-libp2p/p2p/discovery/routing"
+	ncon "github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -67,8 +68,8 @@ type PeerOperations interface {
 
 // FileEntry represents a file or directory entry with metadata
 type FileEntry struct {
-	Type     string `json:"type"`     // "file" or "directory"
-	CID      string `json:"cid"`      // Content identifier
+	Type     string `json:"type"`               // "file" or "directory"
+	CID      string `json:"cid"`                // Content identifier
 	MimeType string `json:"mimeType,omitempty"` // MIME type for files
 }
 
@@ -79,7 +80,7 @@ type GetFileListMessage struct {
 
 // FileListMessage is the response containing a peer's file list
 type FileListMessage struct {
-	CID     string                `json:"cid"`     // Root directory CID
+	CID     string               `json:"cid"`     // Root directory CID
 	Entries map[string]FileEntry `json:"entries"` // Full pathname tree
 }
 
@@ -104,30 +105,30 @@ type Manager struct {
 // Peer represents a single libp2p peer with its own host and state
 // CRC: crc-PeerManager.md
 type Peer struct {
-	ctx              context.Context
-	host             host.Host
-	pubsub           *pubsub.PubSub
-	dht              *dht.IpfsDHT
-	mdnsService      mdns.Service
-	peerID           peer.ID
-	alias            string
-	mu               sync.RWMutex
-	protocols        map[protocol.ID]*ProtocolHandler
-	topics           map[string]*TopicHandler
-	monitoredTopics  map[string]*TopicMonitor // topics being monitored for join/leave events
-	manager          *Manager
-	vcm              *VirtualConnectionManager // Virtual connection manager for reliability
-	directory        *uio.HAMTDirectory        // Peer's file directory (HAMTDirectory)
-	directoryCID     cid.Cid                   // Current CID of the peer's directory
-	fileListHandler  func()                    // Handler for pending listFiles request (single handler per peer)
+	ctx             context.Context
+	host            host.Host
+	pubsub          *pubsub.PubSub
+	dht             *dht.IpfsDHT
+	mdnsService     mdns.Service
+	peerID          peer.ID
+	alias           string
+	mu              sync.RWMutex
+	protocols       map[protocol.ID]*ProtocolHandler
+	topics          map[string]*TopicHandler
+	monitoredTopics map[string]*TopicMonitor // topics being monitored for join/leave events
+	manager         *Manager
+	vcm             *VirtualConnectionManager // Virtual connection manager for reliability
+	directory       *uio.HAMTDirectory        // Peer's file directory (HAMTDirectory)
+	directoryCID    cid.Cid                   // Current CID of the peer's directory
+	fileListHandler func()                    // Handler for pending listFiles request (single handler per peer)
 }
 
 // TopicMonitor tracks peers in a topic and monitors join/leave events
 type TopicMonitor struct {
-	Topic       string
-	ctx         context.Context
-	cancel      context.CancelFunc
-	knownPeers  map[string]bool // track which peers we've seen
+	Topic      string
+	ctx        context.Context
+	cancel     context.CancelFunc
+	knownPeers map[string]bool // track which peers we've seen
 }
 
 // ProtocolHandler handles incoming streams for a protocol
@@ -328,13 +329,13 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 	// Create libp2p host
 	h, err := libp2p.New(
 		libp2p.Identity(priv),
-		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"), // Random port
-		libp2p.ConnectionGater(&allowPrivateGater{}),   // Allow private/local addresses
-		libp2p.EnableRelay(),                            // Enable relay for NAT traversal
+		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"),            // Random port
+		libp2p.ConnectionGater(&allowPrivateGater{}),              // Allow private/local addresses
+		libp2p.EnableRelay(),                                      // Enable relay for NAT traversal
 		libp2p.EnableAutoRelayWithStaticRelays([]peer.AddrInfo{}), // Use public relays
-		libp2p.NATPortMap(),                             // Try NAT port mapping
-		libp2p.EnableNATService(),                       // Help other peers with NAT detection
-		libp2p.EnableHolePunching(),                     // Enable hole punching for direct connections
+		libp2p.NATPortMap(),                                       // Try NAT port mapping
+		libp2p.EnableNATService(),                                 // Help other peers with NAT detection
+		libp2p.EnableHolePunching(),                               // Enable hole punching for direct connections
 		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
 			// Create DHT for global discovery
 			var err error
@@ -345,6 +346,9 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create host: %w", err)
 	}
+
+	bc, _ := h.ConnManager().(*ncon.BasicConnMgr)
+	fmt.Printf("ConnManager: %#v\n", bc.GetInfo())
 
 	// Bootstrap DHT with IPFS nodes for global discovery (async to avoid blocking peer creation)
 	if kdht != nil {
@@ -385,8 +389,8 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 	gossipSubParams := pubsub.DefaultGossipSubParams()
 	// Use default mesh parameters (D=6, Dlo=5, Dhi=12, Dout=2) which are validated and work well
 	// Only adjust heartbeat timing for faster mesh formation in local networks
-	gossipSubParams.HeartbeatInitialDelay = 50 * time.Millisecond  // Faster initial heartbeat for quick mesh formation
-	gossipSubParams.HeartbeatInterval = 500 * time.Millisecond     // More frequent heartbeats (default: 1s)
+	gossipSubParams.HeartbeatInitialDelay = 50 * time.Millisecond // Faster initial heartbeat for quick mesh formation
+	gossipSubParams.HeartbeatInterval = 500 * time.Millisecond    // More frequent heartbeats (default: 1s)
 
 	// Build direct peer list from existing peers in the same Manager
 	// This guarantees localhost peers are always in each other's mesh
@@ -406,8 +410,8 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 			m.ctx,
 			h,
 			pubsub.WithDiscovery(routingDiscovery),
-			pubsub.WithPeerExchange(true),    // Enable peer exchange
-			pubsub.WithFloodPublish(true),    // Flood publish for reliability in small networks
+			pubsub.WithPeerExchange(true), // Enable peer exchange
+			pubsub.WithFloodPublish(true), // Flood publish for reliability in small networks
 			pubsub.WithGossipSubParams(gossipSubParams),
 			pubsub.WithDirectPeers(directPeerInfos), // Guarantee mesh inclusion for localhost peers
 		)
@@ -416,8 +420,8 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 		ps, err = pubsub.NewGossipSub(
 			m.ctx,
 			h,
-			pubsub.WithPeerExchange(true),    // Enable peer exchange
-			pubsub.WithFloodPublish(true),    // Flood publish for reliability in small networks
+			pubsub.WithPeerExchange(true), // Enable peer exchange
+			pubsub.WithFloodPublish(true), // Flood publish for reliability in small networks
 			pubsub.WithGossipSubParams(gossipSubParams),
 			pubsub.WithDirectPeers(directPeerInfos), // Guarantee mesh inclusion for localhost peers
 		)
@@ -727,6 +731,28 @@ func (m *Manager) RemovePeer(peerID string) error {
 
 	// Clean up peer resources
 	return p.Close()
+}
+
+// AddPeers protects and tags peer connections to ensure they remain active
+// CRC: crc-PeerManager.md
+// Sequence: seq-add-peers.md
+func (m *Manager) AddPeers(peerID string, targetPeerIDs []string) error {
+	peer, err := m.getPeer(peerID)
+	if err != nil {
+		return err
+	}
+	return peer.AddPeers(targetPeerIDs)
+}
+
+// RemovePeers unprotects and untags peer connections
+// CRC: crc-PeerManager.md
+// Sequence: seq-remove-peers.md
+func (m *Manager) RemovePeers(peerID string, targetPeerIDs []string) error {
+	peer, err := m.getPeer(peerID)
+	if err != nil {
+		return err
+	}
+	return peer.RemovePeers(targetPeerIDs)
 }
 
 // Shutdown closes all peers
@@ -1220,6 +1246,76 @@ func (p *Peer) ListPeers(topic string) ([]string, error) {
 	}
 
 	return peerStrs, nil
+}
+
+// AddPeers protects and tags peer connections using the libp2p BasicConnMgr
+// For each peer ID: Protect, TagPeer (value 100), and attempt connection (best-effort)
+// CRC: crc-Peer.md
+// Sequence: seq-add-peers.md
+func (p *Peer) AddPeers(targetPeerIDs []string) error {
+	// libp2p host includes a BasicConnMgr (github.com/libp2p/go-libp2p/p2p/net/connmgr)
+	// accessed via h.ConnManager() which provides Protect/TagPeer methods
+	connMgr := p.host.ConnManager()
+
+	for _, peerIDStr := range targetPeerIDs {
+		// Parse peer ID
+		targetPeerID, err := peer.Decode(peerIDStr)
+		if err != nil {
+			// Silently skip invalid peer IDs
+			continue
+		}
+
+		// Protect the connection to prevent the connection manager from closing it
+		connMgr.Protect(targetPeerID, "connected")
+
+		// Tag the peer with priority value 100
+		connMgr.TagPeer(targetPeerID, "connected", 100)
+
+		// Attempt to connect if not already connected (best-effort)
+		// Get addresses from peerstore
+		addrs := p.host.Peerstore().Addrs(targetPeerID)
+		if len(addrs) > 0 {
+			// Have addresses, attempt connection
+			addrInfo := peer.AddrInfo{
+				ID:    targetPeerID,
+				Addrs: addrs,
+			}
+			// Connect with context (ignore errors per spec)
+			_ = p.host.Connect(p.ctx, addrInfo)
+		}
+		// If no addresses, could try DHT lookup, but keeping it simple for now
+		// Connection will happen naturally via mDNS/DHT discovery
+	}
+
+	return nil
+}
+
+// RemovePeers unprotects and untags peer connections using the libp2p BasicConnMgr
+// For each peer ID: Unprotect and UntagPeer
+// Does NOT disconnect the peers, only removes protection and priority
+// CRC: crc-Peer.md
+// Sequence: seq-remove-peers.md
+func (p *Peer) RemovePeers(targetPeerIDs []string) error {
+	// libp2p host includes a BasicConnMgr (github.com/libp2p/go-libp2p/p2p/net/connmgr)
+	// accessed via h.ConnManager() which provides Unprotect/UntagPeer methods
+	connMgr := p.host.ConnManager()
+
+	for _, peerIDStr := range targetPeerIDs {
+		// Parse peer ID
+		targetPeerID, err := peer.Decode(peerIDStr)
+		if err != nil {
+			// Silently skip invalid peer IDs
+			continue
+		}
+
+		// Unprotect the connection to allow normal connection management
+		connMgr.Unprotect(targetPeerID, "connected")
+
+		// Untag the peer to remove priority value
+		connMgr.UntagPeer(targetPeerID, "connected")
+	}
+
+	return nil
 }
 
 func (p *Peer) Monitor(topic string) error {

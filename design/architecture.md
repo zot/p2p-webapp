@@ -27,13 +27,15 @@
 
 ### Peer-to-Peer Networking System
 
-**Purpose**: libp2p networking, peer discovery (mDNS/DHT), protocol messaging, and PubSub
+**Purpose**: libp2p networking, peer discovery (mDNS/DHT), protocol messaging, PubSub, and connection management
 
 **Design Elements**:
 - crc-PeerManager.md
 - crc-Peer.md
 - seq-protocol-communication.md
 - seq-pubsub-communication.md
+- seq-add-peers.md
+- seq-remove-peers.md
 
 ### HTTP Server System
 

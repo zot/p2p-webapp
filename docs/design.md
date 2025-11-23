@@ -180,8 +180,9 @@
 - HAMTDirectory management with pinning
 - Stream lifecycle management
 - Publish file update notifications when configured
+- Connection protection and priority tagging via BasicConnMgr
 
-**Collaborates With**: libp2p host, IPFS peer, PeerManager
+**Collaborates With**: libp2p host, IPFS peer, PeerManager, BasicConnMgr
 
 **Key Methods**:
 - `Start()` - Register protocol handler
@@ -190,6 +191,8 @@
 - `StoreFile()` - Add file to IPFS and directory
 - `RemoveFile()` - Remove file from IPFS and directory
 - `publishFileUpdateNotification()` - Notify subscribers of file changes
+- `AddPeers()` - Protect and tag peer connections
+- `RemovePeers()` - Unprotect and untag peer connections
 
 **Design Pattern**: Active Record Pattern (encapsulates data + operations)
 
@@ -198,6 +201,22 @@
 2. Check if peer is subscribed to notification topic
 3. If both true, publish `{"type":"p2p-webapp-file-update","peer":"<peerID>"}`
 4. Called after successful `StoreFile()` and `RemoveFile()` operations
+
+**Connection Management Flow**:
+<!-- CRC: crc-Peer.md -->
+<!-- Sequence: seq-add-peers.md, seq-remove-peers.md -->
+1. Client calls `addPeers(peerIds)` or `removePeers(peerIds)`
+2. WebSocketHandler routes to PeerManager
+3. PeerManager delegates to Peer method
+4. Peer accesses libp2p BasicConnMgr via `host.ConnManager()`
+5. For `AddPeers()`:
+   - Call `ConnManager().Protect(peerID, "connected")`
+   - Call `ConnManager().TagPeer(peerID, "connected", 100)`
+   - Attempt connection if not already connected (best-effort)
+6. For `RemovePeers()`:
+   - Call `ConnManager().Unprotect(peerID, "connected")`
+   - Call `ConnManager().UntagPeer(peerID, "connected")`
+7. Silently skip invalid peer IDs or errors
 
 ### BundleManager
 

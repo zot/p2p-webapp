@@ -26,6 +26,8 @@
 - publish: Publish message to topic
 - unsubscribe: Unsubscribe from topic
 - listPeers: Get peers subscribed to topic
+- addPeers: Protect and tag peer connections to ensure they remain active (sends addPeers request to server)
+- removePeers: Unprotect and untag peer connections (sends removePeers request to server)
 - listFiles: Request file list from peer (returns promise, manages deduplication and handler pattern for async peerFiles server message)
 - getFile: Request IPFS content by CID with optional fallbackPeerID (triggers gotFile server message with {success, content})
 - storeFile: Store file with signature storeFile(path, content) where content is string or Uint8Array, returns promise resolving to StoreFileResponse {fileCid, rootCid}
@@ -52,6 +54,8 @@
 - seq-client-protocol.md: Protocol-based messaging flow
 - seq-client-pubsub.md: Topic subscription and publishing
 - seq-client-ack.md: Message delivery confirmation flow
+- seq-add-peers.md: Protect and tag peer connections
+- seq-remove-peers.md: Unprotect and untag peer connections
 - seq-list-files.md: File list request with deduplication
 - seq-get-file.md: File retrieval with optional fallback peer
 - seq-store-file.md: File storage on own peer

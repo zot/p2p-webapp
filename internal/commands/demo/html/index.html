@@ -44,9 +44,13 @@
             font-family: monospace;
         }
 
-        #browse-files-btn {
+        .header-buttons {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        #browse-files-btn, #contacts-btn {
             padding: 0.5rem 1rem;
-            background: #16a085;
             color: white;
             border: none;
             border-radius: 4px;
@@ -55,8 +59,25 @@
             transition: background 0.2s;
         }
 
+        #browse-files-btn {
+            background: #16a085;
+        }
+
         #browse-files-btn:hover {
             background: #138d75;
+        }
+
+        #contacts-btn {
+            background: #9b59b6;
+        }
+
+        #contacts-btn:hover {
+            background: #8e44ad;
+        }
+
+        #browse-files-btn:disabled, #contacts-btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
         }
 
         .status {
@@ -464,6 +485,152 @@
         .hidden {
             display: none !important;
         }
+
+        /* Contacts Modal */
+        /* Spec: main.md (demo contact list) */
+        #contacts-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #contacts-modal.active {
+            display: flex;
+        }
+
+        .contacts-content {
+            background: white;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .contacts-list-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            min-height: 200px;
+        }
+
+        .contact-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 3px solid #9b59b6;
+        }
+
+        .contact-item .peer-id {
+            font-family: monospace;
+            font-size: 0.875rem;
+            flex: 1;
+            word-break: break-all;
+        }
+
+        .contact-item .remove-btn {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 0.25rem 0.5rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            margin-left: 0.5rem;
+        }
+
+        .contact-item .remove-btn:hover {
+            background: #c0392b;
+        }
+
+        .empty-contacts {
+            text-align: center;
+            padding: 2rem;
+            color: #999;
+            font-style: italic;
+        }
+
+        .add-contact-form {
+            padding: 1rem;
+            border-top: 1px solid #ddd;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .add-contact-form input {
+            flex: 1;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            font-family: monospace;
+        }
+
+        .add-contact-form button {
+            padding: 0.5rem 1rem;
+            background: #9b59b6;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+        }
+
+        .add-contact-form button:hover {
+            background: #8e44ad;
+        }
+
+        .add-contact-form button:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        .modal-actions {
+            padding: 1rem;
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+        }
+
+        .modal-actions button {
+            padding: 0.5rem 1.5rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+        }
+
+        .modal-actions .cancel-btn {
+            background: #95a5a6;
+            color: white;
+        }
+
+        .modal-actions .cancel-btn:hover {
+            background: #7f8c8d;
+        }
+
+        .modal-actions .accept-btn {
+            background: #27ae60;
+            color: white;
+        }
+
+        .modal-actions .accept-btn:hover {
+            background: #229954;
+        }
     </style>
 </head>
 <body>
@@ -472,7 +639,10 @@
             <h1>P2P Chatroom Demo</h1>
             <div id="peer-id">Connecting...</div>
         </div>
-        <button id="browse-files-btn" disabled>Browse My Files</button>
+        <div class="header-buttons">
+            <button id="contacts-btn" disabled>Contacts</button>
+            <button id="browse-files-btn" disabled>Browse My Files</button>
+        </div>
     </header>
 
     <div id="status" class="status connecting">Connecting to server...</div>
@@ -524,6 +694,28 @@
         </div>
     </div>
 
+    <!-- Contacts Modal -->
+    <!-- Spec: main.md (demo contact list) -->
+    <div id="contacts-modal">
+        <div class="contacts-content">
+            <div class="modal-header">
+                <h2>Contact List</h2>
+                <button class="modal-close" id="contacts-close-btn">&times;</button>
+            </div>
+            <div class="add-contact-form">
+                <input type="text" id="contact-input" placeholder="Enter peer ID (e.g., 12D3KooW...)" />
+                <button id="add-contact-btn">Add</button>
+            </div>
+            <div class="contacts-list-container">
+                <div id="contacts-list"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="cancel-btn" id="contacts-cancel-btn">Cancel</button>
+                <button class="accept-btn" id="contacts-accept-btn">Accept</button>
+            </div>
+        </div>
+    </div>
+
     <script type="module">
         // Import the connect function from the built library
         import { connect } from './index.js';
@@ -552,6 +744,19 @@
         const fileBrowserModal = document.getElementById('file-browser-modal');
         const browseFilesBtn = document.getElementById('browse-files-btn');
         const modalCloseBtn = document.getElementById('modal-close-btn');
+
+        // Contacts state
+        // Spec: main.md (demo contact list)
+        const contactsModal = document.getElementById('contacts-modal');
+        const contactsBtn = document.getElementById('contacts-btn');
+        const contactsCloseBtn = document.getElementById('contacts-close-btn');
+        const contactsList = document.getElementById('contacts-list');
+        const contactInput = document.getElementById('contact-input');
+        const addContactBtn = document.getElementById('add-contact-btn');
+        const contactsCancelBtn = document.getElementById('contacts-cancel-btn');
+        const contactsAcceptBtn = document.getElementById('contacts-accept-btn');
+        let currentContacts = new Set(); // Session-only contact list (not persisted)
+        let modalContacts = new Set(); // Working copy for modal editing
         const peerSelector = document.getElementById('peer-selector');
         const fileTreeDiv = document.getElementById('file-tree');
         const uploadFileBtn = document.getElementById('upload-file-btn');
@@ -1115,6 +1320,99 @@
             uploadFiles(files);
         });
 
+        // Contacts event handlers
+        // Spec: main.md (demo contact list)
+        contactsBtn.addEventListener('click', () => {
+            // Open modal and populate from current contacts
+            modalContacts = new Set(currentContacts);
+            renderContactsList();
+            contactsModal.classList.add('active');
+            contactInput.value = '';
+        });
+
+        contactsCloseBtn.addEventListener('click', () => {
+            contactsModal.classList.remove('active');
+        });
+
+        contactsCancelBtn.addEventListener('click', () => {
+            contactsModal.classList.remove('active');
+        });
+
+        contactsAcceptBtn.addEventListener('click', async () => {
+            // Compute diff between modalContacts and currentContacts
+            const added = [...modalContacts].filter(id => !currentContacts.has(id));
+            const removed = [...currentContacts].filter(id => !modalContacts.has(id));
+
+            try {
+                // Call API methods
+                if (added.length > 0) {
+                    await client.addPeers(added);
+                }
+                if (removed.length > 0) {
+                    await client.removePeers(removed);
+                }
+
+                // Update session state
+                currentContacts = new Set(modalContacts);
+                contactsModal.classList.remove('active');
+            } catch (error) {
+                console.error('Error updating contacts:', error);
+                alert('Failed to update contacts: ' + error.message);
+            }
+        });
+
+        addContactBtn.addEventListener('click', () => {
+            const peerID = contactInput.value.trim();
+            if (!peerID) return;
+
+            // Basic validation: check if it looks like a peer ID
+            if (peerID.length < 10) {
+                alert('Invalid peer ID format');
+                return;
+            }
+
+            // Check for duplicates
+            if (modalContacts.has(peerID)) {
+                alert('Peer ID already in contact list');
+                return;
+            }
+
+            // Add to modal contacts
+            modalContacts.add(peerID);
+            contactInput.value = '';
+            renderContactsList();
+        });
+
+        contactInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                addContactBtn.click();
+            }
+        });
+
+        function renderContactsList() {
+            if (modalContacts.size === 0) {
+                contactsList.innerHTML = '<div class="empty-contacts">No contacts yet. Add peer IDs above to protect their connections.</div>';
+                return;
+            }
+
+            const contactsArray = [...modalContacts].sort();
+            contactsList.innerHTML = contactsArray.map(peerID => `
+                <div class="contact-item">
+                    <div class="peer-id">${peerID}</div>
+                    <button class="remove-btn" data-peer-id="${peerID}">&times;</button>
+                </div>
+            `).join('');
+
+            // Add remove button listeners
+            contactsList.querySelectorAll('.remove-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const peerID = btn.dataset.peerId;
+                    modalContacts.delete(peerID);
+                    renderContactsList();
+                });
+            });
+        }
+
         async function sendMessage() {
             const text = messageInput.value.trim();
             if (!text) return;
@@ -1228,6 +1526,7 @@
                 messageInput.disabled = false;
                 sendButton.disabled = false;
                 browseFilesBtn.disabled = false;
+                contactsBtn.disabled = false;
                 messageInput.focus();
 
                 addMessage('', 'Welcome to the P2P chatroom! Your messages are distributed peer-to-peer.', false, true);

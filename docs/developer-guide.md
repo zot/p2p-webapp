@@ -490,6 +490,83 @@ verbosity = 0  # Minimal output
 autoOpenBrowser = false
 ```
 
+### Connection Management
+
+<!-- Spec: main.md (Connection Management) -->
+<!-- CRC: crc-Peer.md, crc-PeerManager.md -->
+<!-- Sequence: seq-add-peers.md, seq-remove-peers.md -->
+
+p2p-webapp provides explicit control over peer connection priorities through libp2p's **BasicConnMgr** (Connection Manager).
+
+#### Overview
+
+While peer discovery (mDNS/DHT) and connections happen automatically, applications can protect critical connections and assign priority values using the connection management API:
+
+- **`addPeers(peerIds)`**: Protect and tag peer connections
+- **`removePeers(peerIds)`**: Unprotect and untag peer connections
+
+#### BasicConnMgr
+
+The libp2p host includes a **BasicConnMgr** from `github.com/libp2p/go-libp2p/p2p/net/connmgr`, accessed via `host.ConnManager()`:
+
+- **Protection**: Prevents the connection manager from closing specific peer connections
+  - `ConnManager().Protect(peerID, tag)` - Mark connection as protected
+  - `ConnManager().Unprotect(peerID, tag)` - Remove protection
+
+- **Tagging**: Assigns priority values to peers for connection management decisions
+  - `ConnManager().TagPeer(peerID, tag, value)` - Assign priority (higher = more important)
+  - `ConnManager().UntagPeer(peerID, tag)` - Remove priority tag
+
+p2p-webapp uses tag name **"connected"** and priority value **100** for protected peers.
+
+#### Implementation
+
+**Client API** (TypeScript):
+```typescript
+// Protect important peer connections
+await addPeers(['12D3KooW...', '12D3KooX...']);
+
+// Later: remove protection
+await removePeers(['12D3KooW...']);
+```
+
+**Server Implementation** (Go):
+```go
+// internal/peer/manager.go
+func (p *Peer) AddPeers(targetPeerIDs []string) error {
+    connMgr := p.host.ConnManager()
+
+    for _, peerIDStr := range targetPeerIDs {
+        targetPeerID, _ := peer.Decode(peerIDStr)
+
+        // Protect connection from being closed
+        connMgr.Protect(targetPeerID, "connected")
+
+        // Tag peer with priority value
+        connMgr.TagPeer(targetPeerID, "connected", 100)
+
+        // Attempt connection (best-effort)
+        // ...
+    }
+    return nil
+}
+```
+
+#### Use Cases
+
+- **Relay nodes**: Protect connections to circuit relay servers
+- **Application peers**: Ensure critical app peers stay connected
+- **Known servers**: Maintain connections to trusted infrastructure
+- **Testing**: Control peer connections in test scenarios
+
+#### Notes
+
+- Protection and tagging work on peer IDs whether connected or not
+- Connection attempts are best-effort (failures ignored)
+- `removePeers` does NOT disconnect peers, only removes protection/priority
+- Silently skips invalid peer IDs
+- Default BasicConnMgr has unlimited connections (no pruning unless configured)
+
 ---
 
 ## Design Methodology

@@ -274,6 +274,33 @@
 1. `fileUpdateNotifyTopic` is configured in settings
 2. Peer is subscribed to that topic
 
+### FR16: Connection Management
+
+<!-- Source: main.md (Connection Management) -->
+
+**Description**: Provide explicit control over peer connection priorities using libp2p's BasicConnMgr
+
+**Acceptance Criteria**:
+- `addPeers(peerIds)` method to protect and tag peer connections
+- `removePeers(peerIds)` method to unprotect and untag peer connections
+- Protection prevents connection manager from closing connections
+- Tagging assigns priority value (100) to protected peers
+- Best-effort connection attempts for peers not already connected
+- Silently skip invalid peer IDs or connection failures
+
+**Related Requirements**: FR11, FR12
+
+**Use Cases**:
+- Maintain connections to critical relay nodes
+- Ensure application-specific peers stay connected
+- Control peer connections in testing scenarios
+
+**Implementation Details**:
+- Uses libp2p BasicConnMgr (`github.com/libp2p/go-libp2p/p2p/net/connmgr`)
+- Accessed via `host.ConnManager()` methods
+- Tag name: "connected", priority value: 100
+- `removePeers` does NOT disconnect peers, only removes protection/priority
+
 ## Non-Functional Requirements
 
 ### NFR1: Zero Configuration

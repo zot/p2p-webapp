@@ -21,6 +21,8 @@
 - createPeer: Create new libp2p peer with given or fresh peer key, accepts optional rootDirectory CID to restore state
 - removePeer: Remove peer and clean up resources
 - getPeer: Return Peer instance by peerID
+- addPeers: Coordinate protection and tagging of peer connections (delegates to Peer.AddPeers)
+- removePeers: Coordinate unprotection and untagging of peer connections (delegates to Peer.RemovePeers)
 - enableDiscovery: Configure mDNS and DHT discovery for peer
 - enableNATTraversal: Configure Circuit Relay, hole punching, AutoRelay, port mapping for peer
 - setCallbacks: Set callback functions for events
@@ -36,3 +38,5 @@
 ## Sequences
 
 - seq-peer-creation.md: Peer initialization and discovery setup
+- seq-add-peers.md: Connection protection and tagging flow
+- seq-remove-peers.md: Connection unprotection and untagging flow

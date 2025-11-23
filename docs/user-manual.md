@@ -96,18 +96,18 @@ The bundled demo is a peer-to-peer chatroom with file sharing. It demonstrates a
 
 **Main Interface**:
 ```
-┌─────────────────────────────────────────────────┐
-│ P2P Chatroom Demo          [Browse Files]       │
-│ Connected                                        │
-├─────────────────────────┬───────────────────────┤
-│                         │  Peers:               │
-│  Chat Messages          │  • Chat room          │
-│  (Room or DM mode)      │  • Alice              │
-│                         │  • Bob                │
-│                         │  • Carol              │
-│                         │                       │
-│                         │                       │
-└─────────────────────────┴───────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│ P2P Chatroom Demo    [Contacts] [Browse Files]            │
+│ Connected                                                  │
+├─────────────────────────────┬─────────────────────────────┤
+│                             │  Peers:                      │
+│  Chat Messages              │  • Chat room                 │
+│  (Room or DM mode)          │  • Alice                     │
+│                             │  • Bob                       │
+│                             │  • Carol                     │
+│                             │                              │
+│                             │                              │
+└─────────────────────────────┴─────────────────────────────┘
 ```
 
 ### Chat Features
@@ -267,6 +267,73 @@ When file notifications are enabled, peers automatically receive updates when ot
 3. Bob uploads a new file
 4. Alice's file list automatically refreshes to show the new file
 5. No manual refresh needed!
+
+### Managing Contact List
+
+<!-- Spec: main.md (Demo Chatroom Application - Contact List) -->
+
+**What is it?**
+
+The contact list feature allows you to protect connections to specific peers, ensuring they remain active even when the connection manager needs to prune connections. Protected peers receive higher priority, making them less likely to be disconnected.
+
+**How to access**:
+
+1. Click the "Contacts" button in the top-right corner of the header (next to "Browse Files")
+2. Contact management modal opens
+
+**Adding a peer to your contacts**:
+
+1. In the contacts modal, enter a peer ID in the input box
+2. Click "Add Contact" or press Enter
+3. Peer ID appears in the contact list below
+
+**What happens when you add a contact**:
+- The peer's connection is protected from being closed by the connection manager
+- The peer is tagged with a priority value (higher priority = more important)
+- If the peer is known but not connected, a connection attempt is made
+
+**Removing a peer from contacts**:
+
+1. In the contacts modal, find the peer ID in the list
+2. Click the "×" button next to the peer ID
+3. Peer ID is removed from the contact list
+
+**What happens when you remove a contact**:
+- The peer's connection protection is removed
+- The priority tag is removed
+- The connection itself is NOT closed, but may be pruned later if needed
+
+**Accepting or canceling changes**:
+
+- **Accept**: Applies all changes (added and removed contacts) to the connection manager
+  - Calls `addPeers()` for newly added peer IDs
+  - Calls `removePeers()` for removed peer IDs
+  - Contact list is saved for the session
+- **Cancel**: Discards all changes made in the modal
+  - Contact list reverts to previous state
+  - No changes applied to connection manager
+
+**Session-only persistence**:
+
+- Contact list is stored in memory for the current browser session
+- Not saved to localStorage or other persistent storage
+- Closing the browser tab clears the contact list
+- Each new session starts with an empty contact list
+
+**When to use contacts**:
+
+- Keep connections to relay nodes active
+- Maintain connections to important peers for your application
+- Ensure critical peers stay connected during testing
+- Prioritize connections to frequently-used peers
+
+**Input validation**:
+
+- Duplicate peer IDs are prevented automatically
+- Invalid peer ID formats are ignored silently
+- Empty input is not added to the list
+
+**Tip**: Add peers you frequently communicate with to your contacts to ensure stable connections throughout your session.
 
 ## Understanding P2P Concepts
 
@@ -568,4 +635,4 @@ For detailed troubleshooting information:
 
 ---
 
-*Last updated: 2025-11-20 - Added file notification documentation*
+*Last updated: 2025-11-23 - Added contact list management documentation*

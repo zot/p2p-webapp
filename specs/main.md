@@ -49,6 +49,15 @@ For peers behind NATs/firewalls (typical for home networks):
 - **AutoRelay**: automatically finds and uses public relay nodes from the IPFS network
 - **NAT Port Mapping**: attempts UPnP/NAT-PMP for automatic port forwarding
 
+# Connection Management
+While p2p-webapp automatically discovers and connects to peers via mDNS and DHT, applications can explicitly manage connection priorities using the connection manager. The underlying libp2p host uses a BasicConnMgr (from `github.com/libp2p/go-libp2p/p2p/net/connmgr`) that provides connection protection and tagging mechanisms.
+
+**Protection**: Prevents the connection manager from closing specific peer connections, ensuring they remain active even if the manager needs to prune connections.
+
+**Tagging**: Assigns priority values to peers, allowing the connection manager to make informed decisions about which connections to maintain when resources are constrained. Higher tag values indicate higher priority.
+
+The client library provides `addPeers()` and `removePeers()` methods to protect/tag and unprotect/untag peer connections respectively. This is useful for applications that want to ensure critical peer connections remain active, such as maintaining connections to known relay nodes or important application-specific peers.
+
 # Configuration
 p2p-webapp supports optional configuration via a `p2p-webapp.toml` file placed at the site root (same level as html/, ipfs/, storage/ directories).
 
@@ -209,6 +218,36 @@ See `docs/examples/p2p-webapp.toml` for a fully documented example configuration
           - Uses `storeFile(path, content)` for file uploads and `createDirectory(path)` for directory creation
           - Uses `getFile(cid): Promise<FileContent>` for downloads
           - Modal overlay with close button to return to chat
+    - contact list feature
+      - **Contacts button**: Located in the top-right header next to Browse Files
+      - **Contact List Modal**: Manage protected peer connections
+        - **Contact list display**:
+          - Shows all peer IDs in the current contact list
+          - Each entry displays the peer ID with a remove button
+          - Empty state message when no contacts
+        - **Add contact**:
+          - Input field to enter peer ID
+          - Add button to add peer ID to list
+          - Validates peer ID format (prevents duplicates)
+        - **Remove contact**:
+          - Click remove button (×) next to peer ID to remove from list
+        - **Modal actions**:
+          - **Cancel**: Close modal without changes (no API calls)
+          - **Accept**: Apply changes and close modal
+            - Compares new list with previous list
+            - Calls `addPeers(newPeerIds)` for newly added peers
+            - Calls `removePeers(removedPeerIds)` for removed peers
+            - Updates session state with new contact list
+        - **Session persistence**:
+          - Contact list stored in memory during session
+          - Not persisted to browser storage (localStorage/sessionStorage)
+          - Cleared when page is refreshed or closed
+        - **Implementation details**:
+          - Tracks `currentContacts` set in memory
+          - On modal open: populate UI from `currentContacts`
+          - On accept: compute diff (added vs removed)
+          - Uses `addPeers(peerIds)` and `removePeers(peerIds)` connection management API
+          - Modal overlay with cancel/accept buttons
 - **bundle**
   - creates a standalone binary with a site bundled into it
   - works with both bundled and unbundled source binaries (replaces existing bundle if present)
@@ -384,6 +423,25 @@ Peers and their WebSocket connections are ephemeral. The client provides peerKey
 ## listPeers(topic: string)
 - Get list of peers subscribed to a topic
 ### Response: array of peer IDs or error
+
+## addPeers(peerIds: string[])
+- Protect and tag connections to specified peers to ensure they remain active
+- For each peer ID:
+  - Calls `ConnManager().Protect(peerID, "connected")` to prevent connection pruning
+  - Calls `ConnManager().TagPeer(peerID, "connected", 100)` to assign priority value
+  - Attempts to connect if not already connected (best-effort, failures ignored)
+- Silently skips peers that fail protection, tagging, or connection
+- Useful for ensuring critical peer connections remain active
+### Response: null or error
+
+## removePeers(peerIds: string[])
+- Unprotect and untag connections to specified peers
+- For each peer ID:
+  - Calls `ConnManager().Unprotect(peerID, "connected")` to allow connection pruning
+  - Calls `ConnManager().UntagPeer(peerID, "connected")` to remove priority tag
+- Silently skips peers that fail unprotection or untagging
+- Does NOT disconnect the peers, only removes protection and priority
+### Response: null or error
 
 ## listFiles(peerid: string): Promise<{rootCID: string, entries: FileEntries}>
 ### Client TS code

@@ -5,7 +5,7 @@
 ## Responsibilities
 
 ### Knows
-- host: libp2p host instance for networking
+- host: libp2p host instance for networking (includes BasicConnMgr for connection management via ConnManager())
 - peerID: Unique peer identifier
 - alias: Human-readable alias (peer-a, peer-b, ...)
 - pubsub: GossipSub instance for topic-based messaging
@@ -27,6 +27,8 @@
 - publish: Publish message to GossipSub topic
 - unsubscribe: Unsubscribe from topic
 - listPeers: Get list of peers subscribed to topic
+- addPeers: Protect and tag peer connections using ConnManager().Protect(peerID, "connected") and TagPeer(peerID, "connected", 100), attempt connection if not connected
+- removePeers: Unprotect and untag peer connections using ConnManager().Unprotect(peerID, "connected") and UntagPeer(peerID, "connected")
 - monitor: Start monitoring topic for peer join/leave events
 - stopMonitor: Stop monitoring topic
 - listFiles: Request file list from target peer (local or remote via p2p-webapp protocol)
@@ -53,6 +55,8 @@
 
 - seq-protocol-communication.md: Protocol-based peer-to-peer messaging
 - seq-pubsub-communication.md: Topic subscribe/publish flow
+- seq-add-peers.md: Connection protection and tagging flow
+- seq-remove-peers.md: Connection unprotection and untagging flow
 - seq-list-files.md: File list retrieval (local and remote)
 - seq-get-file.md: File retrieval with optional fallback peer
 - seq-store-file.md: File/directory storage in peer directory

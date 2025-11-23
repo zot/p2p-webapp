@@ -28,6 +28,9 @@ type PeerManager interface {
 	// Callback setters
 	SetPeerFilesCallback(cb func(receiverPeerID, targetPeerID, dirCID string, entries map[string]any))
 	SetGotFileCallback(cb func(receiverPeerID string, cid string, success bool, content any))
+	// Connection management
+	AddPeers(peerID string, targetPeerIDs []string) error
+	RemovePeers(peerID string, targetPeerIDs []string) error
 }
 
 // NewHandler creates a new protocol handler
@@ -64,6 +67,10 @@ func (h *Handler) HandleClientMessage(msg *Message, peerID string) (*Message, er
 		return h.handleUnsubscribe(msg, peerID)
 	case "listpeers":
 		return h.handleListPeers(msg, peerID)
+	case "addpeers":
+		return h.handleAddPeers(msg, peerID)
+	case "removepeers":
+		return h.handleRemovePeers(msg, peerID)
 	case "listfiles":
 		return h.handleListFiles(msg, peerID)
 	case "getfile":
@@ -241,6 +248,36 @@ func (h *Handler) handleListPeers(msg *Message, peerID string) (*Message, error)
 		IsResponse: true,
 		Result:     result,
 	}, nil
+}
+
+// CRC: crc-PeerManager.md, crc-Peer.md
+// Sequence: seq-add-peers.md
+func (h *Handler) handleAddPeers(msg *Message, peerID string) (*Message, error) {
+	var req AddPeersRequest
+	if err := json.Unmarshal(msg.Params, &req); err != nil {
+		return h.errorResponse(msg.RequestID, 400, "invalid params")
+	}
+
+	if err := h.peerManager.AddPeers(peerID, req.PeerIDs); err != nil {
+		return h.errorResponse(msg.RequestID, 500, err.Error())
+	}
+
+	return h.emptyResponse(msg.RequestID)
+}
+
+// CRC: crc-PeerManager.md, crc-Peer.md
+// Sequence: seq-remove-peers.md
+func (h *Handler) handleRemovePeers(msg *Message, peerID string) (*Message, error) {
+	var req RemovePeersRequest
+	if err := json.Unmarshal(msg.Params, &req); err != nil {
+		return h.errorResponse(msg.RequestID, 400, "invalid params")
+	}
+
+	if err := h.peerManager.RemovePeers(peerID, req.PeerIDs); err != nil {
+		return h.errorResponse(msg.RequestID, 500, err.Error())
+	}
+
+	return h.emptyResponse(msg.RequestID)
 }
 
 func (h *Handler) handleListFiles(msg *Message, peerID string) (*Message, error) {
