@@ -31,6 +31,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
@@ -120,6 +121,7 @@ type Peer struct {
 	directory       *uio.HAMTDirectory        // Peer's file directory (HAMTDirectory)
 	directoryCID    cid.Cid                   // Current CID of the peer's directory
 	fileListHandler func()                    // Handler for pending listFiles request (single handler per peer)
+	addedPeers      map[peer.ID]bool          // Track peers added via AddPeers (for retry attempts)
 }
 
 // TopicMonitor tracks peers in a topic and monitors join/leave events
@@ -443,6 +445,7 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 		topics:          make(map[string]*TopicHandler),
 		monitoredTopics: make(map[string]*TopicMonitor),
 		manager:         m,
+		addedPeers:      make(map[peer.ID]bool),
 	}
 
 	// Initialize virtual connection manager
@@ -609,6 +612,9 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 			}
 		}
 	}
+
+	// Start background retry goroutine for added peers that haven't connected yet
+	go p.retryAddedPeersLoop()
 
 	return p.peerID.String(), encodedKey, nil
 }
@@ -1261,6 +1267,11 @@ func (p *Peer) AddPeers(targetPeerIDs []string) error {
 			continue
 		}
 
+		// Add to tracking map for retry mechanism
+		p.mu.Lock()
+		p.addedPeers[targetPeerID] = true
+		p.mu.Unlock()
+
 		// Protect the connection to prevent the connection manager from closing it
 		connMgr.Protect(targetPeerID, "connected")
 
@@ -1278,9 +1289,27 @@ func (p *Peer) AddPeers(targetPeerIDs []string) error {
 			}
 			// Connect with context (ignore errors per spec)
 			_ = p.host.Connect(p.ctx, addrInfo)
+		} else if p.dht != nil {
+			// No addresses in peerstore - use DHT to actively find this peer
+			// This is critical for geographically separated peers where mDNS won't work
+			go func(pid peer.ID) {
+				ctx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
+				defer cancel()
+
+				p.logVerbose(2, "Looking up peer %s via DHT...", pid.String())
+				addrInfo, err := p.dht.FindPeer(ctx, pid)
+				if err != nil {
+					// Peer not found via DHT - they may not be online or not connected to DHT
+					p.logVerbose(1, "Could not find peer %s via DHT: %v", pid.String(), err)
+					return
+				}
+
+				// Found peer - add their addresses to peerstore and connect
+				p.logVerbose(2, "Found peer %s via DHT with %d addresses", pid.String(), len(addrInfo.Addrs))
+				p.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, peerstore.PermanentAddrTTL)
+				_ = p.host.Connect(p.ctx, addrInfo)
+			}(targetPeerID)
 		}
-		// If no addresses, could try DHT lookup, but keeping it simple for now
-		// Connection will happen naturally via mDNS/DHT discovery
 	}
 
 	return nil
@@ -1304,6 +1333,11 @@ func (p *Peer) RemovePeers(targetPeerIDs []string) error {
 			continue
 		}
 
+		// Remove from tracking map to stop retry attempts
+		p.mu.Lock()
+		delete(p.addedPeers, targetPeerID)
+		p.mu.Unlock()
+
 		// Unprotect the connection to allow normal connection management
 		connMgr.Unprotect(targetPeerID, "connected")
 
@@ -1312,6 +1346,80 @@ func (p *Peer) RemovePeers(targetPeerIDs []string) error {
 	}
 
 	return nil
+}
+
+// retryAddedPeersLoop periodically retries connecting to added peers that are disconnected
+// Runs every 5 seconds and attempts DHT lookup + connection for disconnected added peers
+func (p *Peer) retryAddedPeersLoop() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case <-ticker.C:
+			p.retryDisconnectedPeers()
+		}
+	}
+}
+
+// retryDisconnectedPeers checks which added peers are disconnected and retries connection
+func (p *Peer) retryDisconnectedPeers() {
+	p.mu.RLock()
+	// Copy the added peers map to avoid holding lock during network operations
+	peersToCheck := make([]peer.ID, 0, len(p.addedPeers))
+	for peerID := range p.addedPeers {
+		peersToCheck = append(peersToCheck, peerID)
+	}
+	p.mu.RUnlock()
+
+	// Check each added peer's connection status
+	for _, targetPeerID := range peersToCheck {
+		// Check if we're connected to this peer
+		connectedness := p.host.Network().Connectedness(targetPeerID)
+		if connectedness == network.Connected {
+			// Already connected, skip
+			continue
+		}
+
+		// Not connected - try to reconnect
+		p.logVerbose(2, "Retrying connection to added peer %s...", targetPeerID.String())
+
+		// First try with existing addresses from peerstore
+		addrs := p.host.Peerstore().Addrs(targetPeerID)
+		if len(addrs) > 0 {
+			addrInfo := peer.AddrInfo{
+				ID:    targetPeerID,
+				Addrs: addrs,
+			}
+			if err := p.host.Connect(p.ctx, addrInfo); err == nil {
+				p.logVerbose(2, "Reconnected to added peer %s using peerstore addresses", targetPeerID.String())
+				continue
+			}
+		}
+
+		// If no addresses or connection failed, try DHT lookup
+		if p.dht != nil {
+			go func(pid peer.ID) {
+				ctx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
+				defer cancel()
+
+				addrInfo, err := p.dht.FindPeer(ctx, pid)
+				if err != nil {
+					p.logVerbose(2, "DHT retry: Could not find peer %s: %v", pid.String(), err)
+					return
+				}
+
+				// Found peer - add addresses and connect
+				p.logVerbose(2, "DHT retry: Found peer %s with %d addresses", pid.String(), len(addrInfo.Addrs))
+				p.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, peerstore.PermanentAddrTTL)
+				if err := p.host.Connect(p.ctx, addrInfo); err == nil {
+					p.logVerbose(1, "Successfully reconnected to added peer %s via DHT", pid.String())
+				}
+			}(targetPeerID)
+		}
+	}
 }
 
 func (p *Peer) Monitor(topic string) error {
