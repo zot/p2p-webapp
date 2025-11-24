@@ -246,6 +246,30 @@ All requirements from main.md are covered by the design:
 
 **Benefits**: Safe concurrent access without database
 
+### Pattern 4: DHT Operation Queuing
+
+**Purpose**: Prevent "no peers in table" errors when DHT operations called before bootstrap completes
+
+**Implementation**: Channel-based readiness signaling (dhtReady), function queue (dhtOperations), mutex protection (dhtOpMu)
+
+**Design Details**:
+- `dhtReady` channel closed when DHT routing table has peers (signals readiness)
+- `enqueueDHTOperation()` checks readiness non-blocking, queues if not ready, executes immediately if ready
+- `bootstrapDHT()` connects to bootstrap peers, waits for routing table (max 30s), processes queued operations
+- `processQueuedDHTOperations()` follows synchronization hygiene (lock → extract → unlock → process)
+
+**Benefits**:
+- Operations never fail with "no peers in table" error
+- Early subscribe operations queue automatically
+- Transparent to client (immediate success response)
+- Minimal lock duration (operation execution not under lock)
+
+**Trade-offs**:
+- Pro: Eliminates race condition at startup
+- Pro: Operations guaranteed to execute (or timeout gracefully)
+- Con: Adds complexity to DHT operation path
+- Con: 30-second maximum delay for queued operations
+
 ---
 
-*Last updated: B6 IPFS file sharing gap resolved - Level 2 design completed*
+*Last updated: Pattern 4 added - DHT operation queuing system designed and implemented*

@@ -34,6 +34,7 @@
 - crc-Peer.md
 - seq-protocol-communication.md
 - seq-pubsub-communication.md
+- seq-dht-bootstrap.md
 - seq-add-peers.md
 - seq-remove-peers.md
 

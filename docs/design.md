@@ -169,25 +169,29 @@
 
 ### Peer
 
-<!-- CRC: crc-PeerManager.md -->
+<!-- CRC: crc-Peer.md -->
 
 **Purpose**: Represent individual peer with P2P operations
 
 **Responsibilities**:
 - Protocol message sending/receiving
-- PubSub subscribe/publish/unsubscribe
+- PubSub subscribe/publish/unsubscribe with DHT integration
+- **DHT topic advertisement**: Continuously advertise topic subscriptions for global discovery
+- **DHT peer discovery**: Query DHT to find peers subscribed to same topics
 - File operations (store, list, get, remove)
 - HAMTDirectory management with pinning
 - Stream lifecycle management
 - Publish file update notifications when configured
 - Connection protection and priority tagging via BasicConnMgr
 
-**Collaborates With**: libp2p host, IPFS peer, PeerManager, BasicConnMgr
+**Collaborates With**: libp2p host, IPFS peer, PeerManager, BasicConnMgr, DHT
 
 **Key Methods**:
 - `Start()` - Register protocol handler
 - `SendToPeer()` - Send message to remote peer
-- `Subscribe()` - Join pubsub topic
+- `Subscribe()` - Join pubsub topic, advertise to DHT, discover peers via DHT
+- `advertiseTopic()` - Continuously advertise topic subscription to DHT (runs until unsubscribe)
+- `discoverTopicPeers()` - Query DHT for peers subscribed to topic, connect to discovered peers (runs once per subscription)
 - `StoreFile()` - Add file to IPFS and directory
 - `RemoveFile()` - Remove file from IPFS and directory
 - `publishFileUpdateNotification()` - Notify subscribers of file changes
@@ -265,6 +269,135 @@
 **Design Pattern**: Singleton Pattern (shared PID file), Registry Pattern
 
 ## Design Patterns
+
+### DHT Bootstrap and Operation Queuing
+
+<!-- CRC: crc-Peer.md -->
+<!-- Sequence: seq-dht-bootstrap.md -->
+
+**Where Used**: Peer (DHT initialization and operation management)
+
+**Why**: Prevent "failed to find any peer in table" errors by queuing DHT operations until routing table is ready
+
+**Implementation**:
+- **Channel-Based Signaling**: `dhtReady` channel closes when DHT routing table populated
+- **Operation Queue**: `dhtOperations` slice stores pending operations as functions
+- **Thread-Safe**: `dhtOpMu` mutex protects operations queue
+- **Bootstrap Process** (`bootstrapDHT()` goroutine):
+  1. Connect to 3+ bootstrap peers
+  2. Run `DHT.Bootstrap()`
+  3. Poll `RoutingTable().Size()` every 500ms (max 30 seconds)
+  4. Close `dhtReady` channel when routing table has peers
+  5. Execute all queued operations
+- **Operation Queuing** (`enqueueDHTOperation()`):
+  - Non-blocking check of `dhtReady` channel via select with default
+  - If DHT not ready: queue operation function
+  - If DHT ready: execute immediately
+  - Transparent to caller (Subscribe returns immediately)
+- **Used by**: `advertiseTopic()`, `discoverTopicPeers()`
+
+**Flow**:
+```
+Peer Creation
+    ↓
+Initialize dhtReady channel (open)
+Initialize dhtOperations queue (empty)
+    ↓
+Launch bootstrapDHT() goroutine
+    ↓
+[User calls Subscribe]
+    ↓
+enqueueDHTOperation(advertiseTopic)
+    ├─ DHT not ready → Queue operation
+    └─ DHT ready → Execute immediately
+    ↓
+Subscribe returns (queuing transparent)
+    ↓
+[Bootstrap completes 5-15s later]
+    ↓
+Close dhtReady channel
+Process all queued operations
+    ↓
+[Subsequent Subscribe calls]
+    ↓
+enqueueDHTOperation executes immediately
+```
+
+**Synchronization Hygiene**:
+- Follows lock → extract → unlock → process pattern
+- `processQueuedDHTOperations()` extracts queue under lock, then executes without lock
+- Minimizes lock duration
+- No locks held during operation execution
+
+**Trade-offs**:
+- Gained: No "no peers in table" errors, transparent queuing, operations never fail
+- Lost: Initial operations delayed 5-30 seconds (queued during bootstrap)
+
+**Timing**:
+- Typical bootstrap: 5-15 seconds
+- Maximum wait: 30 seconds (then timeout)
+- Subsequent operations: Immediate (DHT already ready)
+
+### DHT Topic Discovery
+
+<!-- CRC: crc-Peer.md -->
+<!-- Sequence: seq-pubsub-communication.md, seq-dht-bootstrap.md -->
+
+**Where Used**: Peer (GossipSub subscription integration)
+
+**Why**: Enable geographic peer connectivity beyond local networks
+
+**Implementation**:
+- **Automatic on subscription**: When peer subscribes to topic (e.g., "chatroom"):
+  1. `advertiseTopic()` queued/executed via `enqueueDHTOperation()`
+  2. `discoverTopicPeers()` queued/executed via `enqueueDHTOperation()`
+- **advertiseTopic() behavior**:
+  - Advertises topic subscription to DHT using `routing.Provide()`
+  - Re-advertises periodically (every TTL/2) to maintain discoverability
+  - Runs continuously until topic unsubscribed (handler.ctx.Done())
+  - No-op if DHT is nil (gracefully handles missing DHT)
+  - **Queues if DHT not ready** (during bootstrap)
+- **discoverTopicPeers() behavior**:
+  - Queries DHT for peers advertising same topic using `routing.FindProviders()`
+  - Adds discovered peer addresses to peerstore with TempAddrTTL
+  - Attempts automatic connection to discovered peers
+  - Runs once per subscription (not continuous like advertisement)
+  - Skips self peer ID to avoid self-connection
+  - **Queues if DHT not ready** (during bootstrap)
+- **Complements mDNS**: Works alongside local mDNS discovery for complete coverage
+
+**Flow**:
+```
+Subscribe("chatroom") called
+    ↓
+GossipSub.Join + Subscribe
+    ↓
+enqueueDHTOperation(advertiseTopic) ──→ Queued if DHT not ready
+    ↓                                    Executed immediately if ready
+    |                                               ↓
+    ↓                                    DHT.Provide("chatroom", peerID)
+enqueueDHTOperation(discoverTopicPeers) ↓
+    ↓                                    Re-advertise every TTL/2
+DHT.FindProviders("chatroom")           ↓
+    ↓                                    Until unsubscribe
+For each discovered peer:
+  - Add addresses to peerstore
+  - Attempt connection
+    ↓
+Wait for mesh formation (up to 5s)
+    ↓
+Return to caller
+```
+
+**Trade-offs**:
+- Gained: Geographic reach, topic-based discovery, automatic connections, resilient to network changes, no "no peers in table" errors
+- Lost: DHT latency (discovery takes seconds vs. mDNS milliseconds), initial operations delayed during bootstrap
+
+**Use Cases**:
+- Users on different networks (home, office, mobile)
+- Geographically distributed teams
+- Public applications without known relay nodes
+- NAT/firewall traversal via discovered relays
 
 ### Virtual Connection Model
 
@@ -621,4 +754,4 @@ Client → Client: Call listFiles() to refresh (if viewing)
 
 ---
 
-*Last updated: 2025-11-20 - Added File Update Notification Flow*
+*Last updated: 2025-11-24 - Added DHT Topic Discovery design pattern*

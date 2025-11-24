@@ -64,12 +64,12 @@ Test suite for Peer component covering protocol messaging, pub/sub communication
 
 ### Test: Subscribe to topic
 
-**Purpose**: Verify that Peer can subscribe to GossipSub topic and wait for mesh formation.
+**Purpose**: Verify that Peer can subscribe to GossipSub topic, advertise to DHT, discover peers, and wait for mesh formation.
 
-**Motivation**: Foundation for pub/sub messaging. Must handle mesh formation.
+**Motivation**: Foundation for pub/sub messaging with global peer discovery. Must handle mesh formation and DHT integration.
 
 **Input**:
-- Peer A initialized
+- Peer A initialized with DHT enabled
 - Call subscribe("general-chat")
 
 **References**:
@@ -79,13 +79,95 @@ Test suite for Peer component covering protocol messaging, pub/sub communication
 **Expected Results**:
 - Peer A subscribes to topic "general-chat"
 - Topic entry created in topics map
+- advertiseTopic goroutine launched (starts DHT advertisement)
+- discoverTopicPeers goroutine launched (queries DHT for peers)
 - Waits for mesh formation before returning
 - TopicHandler created for message routing
 - Peer A visible to other peers via listPeers()
 
 **References**:
-- CRC: crc-Peer.md - "Knows: topics, pubsub"
-- CRC: crc-Peer.md - "Collaborators: GossipSub"
+- CRC: crc-Peer.md - "Knows: topics, pubsub, dht"
+- CRC: crc-Peer.md - "Collaborators: GossipSub, DHT"
+
+---
+
+### Test: DHT topic advertisement
+
+**Purpose**: Verify that Peer continuously advertises topic subscription to DHT.
+
+**Motivation**: Enables global peer discovery beyond local networks.
+
+**Input**:
+- Peer A subscribed to "general-chat"
+- DHT enabled
+- Wait for initial advertisement and re-advertisement
+
+**References**:
+- CRC: crc-Peer.md - "Does: advertiseTopic"
+- Sequence: seq-pubsub-communication.md
+
+**Expected Results**:
+- Initial advertisement succeeds with TTL returned
+- Re-advertisement occurs at TTL/2 interval
+- Advertisement stops when topic unsubscribed (handler.ctx.Done())
+- No advertisement attempted if DHT is nil
+
+**References**:
+- CRC: crc-Peer.md - "Knows: dht"
+- CRC: crc-Peer.md - "Collaborators: DHT"
+
+---
+
+### Test: DHT topic peer discovery
+
+**Purpose**: Verify that Peer discovers other peers subscribed to same topic via DHT.
+
+**Motivation**: Enables geographically distant peers to find each other.
+
+**Input**:
+- Peer A subscribed to "general-chat" with DHT advertisement
+- Peer B subscribed to "general-chat" with DHT advertisement
+- DHT network functioning
+
+**References**:
+- CRC: crc-Peer.md - "Does: discoverTopicPeers"
+- Sequence: seq-pubsub-communication.md
+
+**Expected Results**:
+- Peer B discovers Peer A via DHT query (or vice versa)
+- Discovered peer's addresses added to peerstore with TempAddrTTL
+- Automatic connection attempt to discovered peer
+- Connection succeeds (or fails gracefully if unreachable)
+- Discovered peer excluded if it's self (skip own peer ID)
+
+**References**:
+- CRC: crc-Peer.md - "Knows: dht, host"
+- CRC: crc-Peer.md - "Collaborators: DHT, libp2p Host"
+
+---
+
+### Test: Subscribe without DHT
+
+**Purpose**: Verify that Peer handles subscription when DHT is disabled/nil.
+
+**Motivation**: DHT is optional - must work without it.
+
+**Input**:
+- Peer A initialized without DHT (dht == nil)
+- Call subscribe("general-chat")
+
+**References**:
+- CRC: crc-Peer.md - "Does: subscribe"
+
+**Expected Results**:
+- Peer A subscribes to topic "general-chat"
+- No DHT advertisement attempted
+- No DHT peer discovery attempted
+- Waits for mesh formation via other mechanisms (mDNS, direct connections)
+- TopicHandler created normally
+
+**References**:
+- CRC: crc-Peer.md - "Knows: topics, pubsub, dht"
 
 ---
 
@@ -583,10 +665,12 @@ Test suite for Peer component covering protocol messaging, pub/sub communication
 - ✅ start - Protocol listener registration (implicit in receive test)
 - ✅ stop - Protocol listener removal (not explicitly tested, low priority)
 - ✅ sendToPeer - Protocol messaging send test
-- ✅ subscribe - Topic subscription test
+- ✅ subscribe - Topic subscription test with DHT advertisement and discovery
 - ✅ publish - Topic publishing tests (success and failure)
 - ✅ unsubscribe - Topic unsubscription test
 - ✅ listPeers - Topic peer listing test
+- ✅ advertiseTopic - DHT topic advertisement test (continuous re-advertisement)
+- ✅ discoverTopicPeers - DHT peer discovery test
 - ✅ addPeers - Connection protection test
 - ✅ removePeers - Connection unprotection test
 - ✅ monitor - Topic monitoring test
@@ -603,7 +687,7 @@ Test suite for Peer component covering protocol messaging, pub/sub communication
 
 **Scenarios Covered**:
 - ✅ seq-protocol-communication.md - Send and receive protocol message tests
-- ✅ seq-pubsub-communication.md - Subscribe, publish, monitor tests
+- ✅ seq-pubsub-communication.md - Subscribe, publish, monitor tests with DHT integration
 - ✅ seq-add-peers.md - Connection protection test
 - ✅ seq-remove-peers.md - Connection unprotection test
 - ✅ seq-list-files.md - Local and remote file listing tests
@@ -615,3 +699,4 @@ Test suite for Peer component covering protocol messaging, pub/sub communication
 - Concurrent file operations not tested (future enhancement)
 - Large file transfers and performance not tested
 - Network partition and recovery scenarios not tested
+- DHT bootstrap and connectivity edge cases not fully tested

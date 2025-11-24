@@ -47,6 +47,7 @@ def check_required_components(project_root):
 
     components = [
         ('.claude/agents/designer.md', 'designer agent', True),
+        ('.claude/agents/design-maintainer.md', 'design-maintainer agent', True),
         ('.claude/agents/sequence-diagrammer.md', 'sequence-diagrammer agent', True),
         ('.claude/agents/test-designer.md', 'test-designer agent', True),
         ('.claude/agents/gap-analyzer.md', 'gap-analyzer agent', True),
@@ -114,7 +115,9 @@ Level 3: Implementation (source code)
 
 **Workflow:**
 1. Read human specs (`specs/*.md`) for design intent
-2. Use `designer` agent to create Level 2 specs (CRC cards, sequences, UI specs, architecture mapping)
+2. Use `designer` agent to create Level 2 specs (CRC cards, sequences, UI specs, architecture mapping, **and test designs**)
+   - Designer agent MUST invoke test-designer sub-agent (automatic, mandatory step)
+   - Verify test design files (`design/test-*.md`) are created before proceeding
 3. Generate code following complete specification with traceability comments
 
 **Design Entry Point:**
@@ -132,11 +135,22 @@ Level 3: Implementation (source code)
 - ❌ Wrong: `CRC: design/crc-Person.md`, `Spec: specs/main.md`
 
 **Test Implementation:**
+- **Test designs are Level 2 artifacts**: Designer agent automatically generates test design specs (`design/test-*.md`) via the test-designer sub-agent
+- **ALWAYS read test designs BEFORE writing test code**: Test designs specify what to test, test code implements those specifications
+- **Test code MUST implement all scenarios from test designs**: Every test scenario in `design/test-*.md` must have corresponding test code
+- **Traceability**: Test files reference test designs in comments: `// Test Design: test-ComponentName.md`
 - Test files belong in top-level `tests/` directory (NOT nested under `src/`)
-- Test designs reference: `Test Design: test-ComponentName.md`
 - When configuring build tools (Vite, Webpack, etc.), ensure test runner configurations are separate from application build configurations
 - If build config sets a custom `root` directory, create a separate test configuration file to avoid test discovery issues
 - Run `npm test` to verify test discovery works correctly before considering tests complete
+
+**Test Design Workflow:**
+1. Designer agent creates CRC cards and sequences (Level 2)
+2. Designer agent invokes test-designer agent (automatic, mandatory)
+3. Test-designer generates test design specs (`design/test-*.md`)
+4. Read test designs to understand what needs testing
+5. Implement tests following test design specifications
+6. Reference test designs in test code comments
 
 See `.claude/doc/crc.md` for complete documentation.
 
@@ -150,6 +164,15 @@ See `.claude/doc/crc.md` for complete documentation.
 - Changed interactions → Update sequence diagrams
 - Template/view changes → Update UI specs
 
+**Use the `design-maintainer` agent to automate this:**
+```
+When you've made code changes, invoke the design-maintainer agent to:
+- Update CRC cards with new methods/fields
+- Update sequence diagrams for changed workflows
+- Add traceability comments to new code
+- Check off traceability.md checkboxes
+```
+
 **Design Spec Changes → Architectural Specs:**
 - Modified CRC cards/sequences → Update high-level specs if requirements/architecture affected
 - New components → Document in feature specs and update `design/architecture.md`
@@ -161,6 +184,11 @@ See `.claude/doc/crc.md` for complete documentation.
 2. **Maintain abstraction**: Each level documents at its appropriate abstraction
 3. **Keep consistency**: All three tiers must tell the same story at their respective levels
 4. **Update traceability comments**: When docs change, update CRC/spec references in code comments
+
+**Agent Workflow:**
+- **Requirements → Design**: Use `designer` agent (Level 1 → Level 2)
+- **Code → Design**: Use `design-maintainer` agent (Level 3 → Level 2)
+- **Design → Documentation**: Use `documenter` agent (Level 2 → Docs)
 
 ### 📚 Documentation Generation
 

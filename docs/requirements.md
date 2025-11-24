@@ -200,16 +200,48 @@
 ### FR11: Peer Discovery
 
 <!-- Source: main.md -->
+<!-- CRC: crc-Peer.md -->
+<!-- Sequence: seq-dht-bootstrap.md -->
 
-**Description**: Automatically discover peers using mDNS and DHT
+**Description**: Automatically discover peers using mDNS and DHT with topic-based advertisement
 
 **Acceptance Criteria**:
-- mDNS discovery for local network peers
+- mDNS discovery for local network peers (automatic, zero-config)
 - DHT discovery for global peer connectivity
-- Gossipsub topic subscription via DHT
+- **DHT bootstrap with operation queuing**: DHT operations queue automatically until routing table populates
+- **Topic subscription advertisement via DHT**: Peers advertise topic subscriptions to DHT for global discovery
+- **Continuous DHT advertisement**: Re-advertise topic subscriptions periodically to maintain discoverability
+- **Automatic topic peer discovery**: Query DHT to discover other peers subscribed to same topics
 - Bootstrap using public IPFS DHT nodes
 
-**Related Requirements**: FR12
+**Implementation Details**:
+- **DHT Bootstrap Process**:
+  1. Connect to 3+ bootstrap peers from public IPFS DHT nodes
+  2. Run DHT.Bootstrap() to populate routing table
+  3. Wait up to 30 seconds for routing table to have peers (poll every 500ms)
+  4. Signal readiness via channel close when routing table populated
+  5. Process any queued DHT operations (advertisement, discovery)
+- **DHT Operation Queuing**:
+  - Operations (Advertise, FindPeers) queue automatically if DHT not ready
+  - Subscribe returns immediately (queuing happens transparently)
+  - Operations execute when DHT routing table populated
+  - Prevents "failed to find any peer in table" errors
+  - Typical bootstrap time: 5-15 seconds, max wait: 30 seconds
+- When peer subscribes to a topic (e.g., "chatroom"), automatically:
+  1. Queue advertiseTopic() if DHT not ready, execute immediately if ready
+  2. Queue discoverTopicPeers() if DHT not ready, execute immediately if ready
+  3. Advertise subscription to DHT with periodic re-advertisement (every TTL/2)
+  4. Query DHT to discover other peers subscribed to same topic
+  5. Attempt connections to discovered peers
+- Enables geographically distant peers to find each other via topic interest
+- Complements mDNS (local) with DHT (global) for complete coverage
+
+**Timing Expectations**:
+- **First operation after peer creation**: May take 10-30 seconds (queued during bootstrap)
+- **Subsequent operations**: Immediate (DHT already bootstrapped)
+- **Bootstrap success logging**: Visible at verbosity level 2 (`-vv`)
+
+**Related Requirements**: FR3, FR12
 
 ### FR12: NAT Traversal
 
@@ -416,4 +448,4 @@
 
 ---
 
-*Last updated: 2025-11-20 - Added FR15: File Availability Notifications*
+*Last updated: 2025-11-24 - Added DHT topic discovery details to FR11*

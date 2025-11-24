@@ -109,6 +109,9 @@ type Peer struct {
 	host            host.Host
 	pubsub          *pubsub.PubSub
 	dht             *dht.IpfsDHT
+	dhtReady        chan struct{}             // Closed when DHT is bootstrapped and ready for operations
+	dhtOperations   []func()                  // Queue of pending DHT operations (executed when DHT ready)
+	dhtOpMu         sync.Mutex                // Protects dhtOperations queue
 	mdnsService     mdns.Service
 	peerID          peer.ID
 	alias           string
@@ -348,28 +351,7 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 		return "", "", fmt.Errorf("failed to create host: %w", err)
 	}
 
-	// Bootstrap DHT with IPFS nodes for global discovery (async to avoid blocking peer creation)
-	if kdht != nil {
-		go func() {
-			bootstrapPeers := dht.GetDefaultBootstrapPeerAddrInfos()
-			connected := 0
-			for _, peerinfo := range bootstrapPeers {
-				if err := h.Connect(m.ctx, peerinfo); err == nil {
-					connected++
-				}
-				// Stop after connecting to 3 bootstrap nodes (sufficient for DHT)
-				if connected >= 3 {
-					break
-				}
-			}
-			if err := kdht.Bootstrap(m.ctx); err != nil {
-				// Log but don't fail - DHT will continue trying to bootstrap
-				if m.verbosity >= 1 {
-					fmt.Printf("DHT bootstrap warning: %v\n", err)
-				}
-			}
-		}()
-	}
+	// Note: DHT bootstrap is started later after peer creation (see below)
 
 	// Setup mDNS for local discovery
 	mdnsService := mdns.NewMdnsService(h, "p2p-webapp", &discoveryNotifee{h: h})
@@ -439,6 +421,8 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 		host:            h,
 		pubsub:          ps,
 		dht:             kdht,
+		dhtReady:        make(chan struct{}), // Will be closed when DHT bootstrap completes
+		dhtOperations:   make([]func(), 0),   // Queue for DHT operations
 		mdnsService:     mdnsService,
 		peerID:          h.ID(),
 		protocols:       make(map[protocol.ID]*ProtocolHandler),
@@ -615,6 +599,14 @@ func (m *Manager) CreatePeer(requestedPeerKey string, rootDirectory string) (pee
 
 	// Start background retry goroutine for added peers that haven't connected yet
 	go p.retryAddedPeersLoop()
+
+	// Start DHT bootstrap goroutine (signals readiness and processes queued operations)
+	if kdht != nil {
+		go p.bootstrapDHT(kdht, h)
+	} else {
+		// No DHT - close dhtReady immediately so operations don't wait
+		close(p.dhtReady)
+	}
 
 	return p.peerID.String(), encodedKey, nil
 }
@@ -1136,6 +1128,12 @@ func (p *Peer) Subscribe(topic string) error {
 	// Start reading messages
 	go p.readFromTopic(handler)
 
+	// Advertise topic to DHT for global discovery (enables geographically distant peers to find each other)
+	if p.dht != nil {
+		go p.advertiseTopic(topic, handler)
+		go p.discoverTopicPeers(topic)
+	}
+
 	// Wait for gossip mesh to form before returning
 	// This ensures peers can communicate immediately after Subscribe() returns
 	p.waitForMeshFormation(t)
@@ -1222,6 +1220,84 @@ func (p *Peer) waitForMeshFormation(t *pubsub.Topic) {
 			}
 		}
 	}
+}
+
+// advertiseTopic advertises a topic subscription to the DHT for global peer discovery
+// Runs continuously and re-advertises periodically as DHT advertisements expire
+// Queues operation if DHT not ready yet
+// Sequence: seq-pubsub-communication.md
+func (p *Peer) advertiseTopic(topic string, handler *TopicHandler) {
+	// Wrap the main logic so it can be queued
+	p.enqueueDHTOperation(func() {
+		routingDiscovery := discoveryrouting.NewRoutingDiscovery(p.dht)
+
+		// Initial advertisement
+		ttl, err := routingDiscovery.Advertise(p.ctx, topic)
+		if err != nil {
+			p.logVerbose(1, "Failed to advertise topic %s to DHT: %v", topic, err)
+			return
+		}
+		p.logVerbose(2, "Advertised topic %s to DHT (TTL: %v)", topic, ttl)
+
+		// Re-advertise periodically (before TTL expires)
+		// Use half the TTL to ensure we don't miss the window
+		ticker := time.NewTicker(ttl / 2)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-p.ctx.Done():
+				return
+			case <-handler.ctx.Done():
+				// Topic unsubscribed, stop advertising
+				return
+			case <-ticker.C:
+				ttl, err = routingDiscovery.Advertise(p.ctx, topic)
+				if err != nil {
+					p.logVerbose(2, "Failed to re-advertise topic %s to DHT: %v", topic, err)
+				} else {
+					p.logVerbose(3, "Re-advertised topic %s to DHT (TTL: %v)", topic, ttl)
+				}
+			}
+		}
+	})
+}
+
+// discoverTopicPeers discovers and connects to peers subscribed to a topic via DHT
+// Queues operation if DHT not ready yet
+// Sequence: seq-pubsub-communication.md
+func (p *Peer) discoverTopicPeers(topic string) {
+	// Wrap the main logic so it can be queued
+	p.enqueueDHTOperation(func() {
+		routingDiscovery := discoveryrouting.NewRoutingDiscovery(p.dht)
+		p.logVerbose(2, "Discovering peers for topic %s via DHT...", topic)
+
+		// FindPeers queries the DHT for peers advertising this topic
+		peerChan, err := routingDiscovery.FindPeers(p.ctx, topic)
+		if err != nil {
+			p.logVerbose(1, "Failed to start DHT peer discovery for topic %s: %v", topic, err)
+			return
+		}
+
+		// Process discovered peers
+		for peer := range peerChan {
+			if peer.ID == p.peerID {
+				continue // Skip self
+			}
+
+			p.logVerbose(2, "Discovered peer %s for topic %s via DHT (addrs: %d)", peer.ID.String(), topic, len(peer.Addrs))
+
+			// Add addresses to peerstore with temporary TTL
+			p.host.Peerstore().AddAddrs(peer.ID, peer.Addrs, peerstore.TempAddrTTL)
+
+			// Attempt connection (best effort)
+			if err := p.host.Connect(p.ctx, peer); err != nil {
+				p.logVerbose(2, "Failed to connect to DHT-discovered peer %s: %v", peer.ID.String(), err)
+			} else {
+				p.logVerbose(1, "Connected to peer %s via DHT topic discovery", peer.ID.String())
+			}
+		}
+	})
 }
 
 func (p *Peer) ListPeers(topic string) ([]string, error) {
@@ -1419,6 +1495,112 @@ func (p *Peer) retryDisconnectedPeers() {
 				}
 			}(targetPeerID)
 		}
+	}
+}
+
+// bootstrapDHT bootstraps the DHT and signals readiness when complete
+// Queued DHT operations are executed once the DHT has peers in its routing table
+// CRC: crc-Peer.md
+// Spec: main.md
+// Sequence: seq-dht-bootstrap.md
+func (p *Peer) bootstrapDHT(kdht *dht.IpfsDHT, h host.Host) {
+	// Connect to bootstrap peers
+	bootstrapPeers := dht.GetDefaultBootstrapPeerAddrInfos()
+	connected := 0
+	for _, peerinfo := range bootstrapPeers {
+		if err := h.Connect(p.ctx, peerinfo); err == nil {
+			connected++
+			p.logVerbose(3, "Connected to bootstrap peer %s", peerinfo.ID.String())
+		}
+		// Stop after connecting to 3 bootstrap nodes (sufficient for DHT)
+		if connected >= 3 {
+			break
+		}
+	}
+
+	if connected == 0 {
+		p.logVerbose(1, "Warning: Failed to connect to any bootstrap peers")
+	} else {
+		p.logVerbose(2, "Connected to %d bootstrap peers", connected)
+	}
+
+	// Bootstrap the DHT
+	if err := kdht.Bootstrap(p.ctx); err != nil {
+		p.logVerbose(1, "DHT bootstrap warning: %v", err)
+	}
+
+	// Wait for DHT to have peers in routing table (up to 30 seconds)
+	// This ensures DHT operations (Advertise, FindPeers) will succeed
+	p.logVerbose(2, "Waiting for DHT routing table to populate...")
+	deadline := time.Now().Add(30 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			// Context cancelled, close dhtReady anyway
+			close(p.dhtReady)
+			return
+		case <-ticker.C:
+			// Check if DHT has peers
+			if kdht.RoutingTable().Size() > 0 {
+				p.logVerbose(1, "DHT ready with %d peers in routing table", kdht.RoutingTable().Size())
+				// Signal readiness
+				close(p.dhtReady)
+				// Process queued operations
+				p.processQueuedDHTOperations()
+				return
+			}
+			// Check timeout
+			if time.Now().After(deadline) {
+				p.logVerbose(1, "DHT bootstrap timeout (no peers after 30s), proceeding anyway")
+				// Close anyway so operations don't wait forever
+				close(p.dhtReady)
+				// Try to process queued operations anyway (they might fail but will be logged)
+				p.processQueuedDHTOperations()
+				return
+			}
+		}
+	}
+}
+
+// processQueuedDHTOperations executes all queued DHT operations
+// Must be called after dhtReady is closed
+// CRC: crc-Peer.md
+// Spec: main.md
+// Sequence: seq-dht-bootstrap.md
+func (p *Peer) processQueuedDHTOperations() {
+	p.dhtOpMu.Lock()
+	operations := p.dhtOperations
+	p.dhtOperations = nil // Clear queue
+	p.dhtOpMu.Unlock()
+
+	if len(operations) > 0 {
+		p.logVerbose(2, "Processing %d queued DHT operations", len(operations))
+		for _, op := range operations {
+			op() // Execute each queued operation
+		}
+	}
+}
+
+// enqueueDHTOperation queues a DHT operation or executes it immediately if DHT is ready
+// This ensures DHT operations don't fail with "no peers in table" errors
+// CRC: crc-Peer.md
+// Spec: main.md
+// Sequence: seq-dht-bootstrap.md
+func (p *Peer) enqueueDHTOperation(op func()) {
+	// Check if DHT is ready using non-blocking select
+	select {
+	case <-p.dhtReady:
+		// DHT is ready, execute immediately
+		op()
+	default:
+		// DHT not ready yet, queue the operation
+		p.dhtOpMu.Lock()
+		p.dhtOperations = append(p.dhtOperations, op)
+		p.dhtOpMu.Unlock()
+		p.logVerbose(2, "Queued DHT operation (DHT not ready yet)")
 	}
 }
 

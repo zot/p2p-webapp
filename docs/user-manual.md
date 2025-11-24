@@ -356,33 +356,164 @@ The contact list feature allows you to protect connections to specific peers, en
 ### Peer Discovery
 
 <!-- Spec: main.md (FR11: Peer Discovery, FR12: NAT Traversal) -->
+<!-- CRC: crc-Peer.md -->
+<!-- Sequence: seq-pubsub-communication.md -->
 
-**How peers find each other**:
+**How peers find each other automatically**:
 
-1. **Local Discovery (mDNS)**:
-   - Discovers peers on same network (LAN)
-   - Fast (sub-second)
-   - Zero configuration
+p2p-webapp uses two discovery systems working together:
 
-2. **Global Discovery (DHT)**:
-   - Discovers peers across the internet
-   - Uses distributed hash table
-   - Bootstraps via public IPFS nodes
+#### 1. Local Discovery (mDNS)
 
-3. **Topic Subscription**:
-   - When you subscribe to a topic (e.g., "chatroom")
-   - DHT advertises your subscription
-   - Other subscribers find you automatically
+**What it does**: Finds peers on your same network (WiFi/LAN)
 
-**NAT Traversal**:
+**How it works**:
+- Broadcasts "I'm here!" on your local network
+- Other peers on same network instantly respond
+- Very fast (under 1 second)
+- Works without internet connection
 
-Most home networks use NAT (Network Address Translation), which can block direct connections:
+**Best for**:
+- Development on the same computer
+- Collaboration in same office/home
+- Testing locally
 
-- **Relay**: Connect via intermediate peer
-- **Hole Punching**: Attempt direct connection through NAT
-- **Automatic**: p2p-webapp handles this transparently
+#### 2. Global Discovery (DHT + Topic Advertisement)
 
-**You don't need to configure anything** - discovery happens automatically!
+<!-- Sequence: seq-dht-bootstrap.md -->
+
+**What it does**: Finds peers anywhere on the internet based on shared interests
+
+**Important**: DHT operations queue automatically during bootstrap (first 5-30 seconds), so you won't see "no peers in table" errors!
+
+**How it works**:
+
+**When you first start the app**:
+- DHT bootstrap starts in the background (5-30 seconds)
+- Connects to public IPFS nodes to build routing table
+- Operations queue automatically until bootstrap completes
+- You can use the app immediately - queuing is transparent!
+
+**When you join a chatroom** (or subscribe to any topic):
+
+1. **You advertise your interest**:
+   - p2p-webapp tells the DHT network "I'm in the 'chatroom' topic"
+   - If DHT is still bootstrapping, this operation queues automatically
+   - When bootstrap completes (5-30 seconds), advertisement starts
+   - Re-advertises periodically to stay discoverable
+   - Like posting "Looking for chatroom friends" on a global bulletin board
+
+2. **You discover others**:
+   - p2p-webapp asks the DHT "Who else is in 'chatroom'?"
+   - If DHT is still bootstrapping, this operation queues automatically
+   - When bootstrap completes, discovery starts
+   - DHT returns peer addresses from around the world
+   - Automatic connection attempts to discovered peers
+
+3. **Others discover you**:
+   - When new peers join "chatroom", they find your advertisement
+   - They automatically try to connect to you
+
+**Best for**:
+- Connecting with users on different networks (home, office, mobile)
+- Geographic collaboration (different cities/countries)
+- Public applications without known server addresses
+
+**Timeline**:
+- **Local peers (mDNS)**: Found in < 1 second
+- **DHT bootstrap**: 5-15 seconds (typical), max 30 seconds
+- **Remote peers (DHT)**: Found 10-30 seconds after bootstrap completes
+- **First join after startup**: May take 10-30 seconds for DHT operations (queued during bootstrap)
+- **Subsequent joins**: Immediate (DHT already ready)
+- **Be patient** - global discovery takes time, but it's automatic!
+
+#### Why Both?
+
+**Together they provide complete coverage**:
+- **mDNS**: Fast local connections (milliseconds)
+- **DHT**: Global reach (seconds to minutes)
+- **Automatic**: Both work simultaneously, no setup needed
+
+**Example scenario**:
+- You and a coworker in same office → Found via mDNS instantly
+- You and a friend in different cities → Found via DHT after ~15 seconds
+- You work from home, coworker at office → DHT enables connection
+
+#### NAT Traversal (Firewall/Router Workaround)
+
+**The problem**: Most home networks have firewalls (NAT) that block direct connections
+
+**The solution**: p2p-webapp automatically handles this:
+
+- **Circuit Relay**: Connects via an intermediate helper peer
+  - Like asking a mutual friend to pass messages
+  - Slower but works everywhere
+
+- **Hole Punching**: Attempts direct connection through firewall
+  - Tries to "punch a hole" through both firewalls
+  - Faster if successful
+
+- **AutoRelay**: Automatically finds public relay servers
+  - Discovers relay peers via DHT
+  - No manual configuration needed
+
+- **Port Mapping**: Tries to automatically open firewall port
+  - Uses UPnP or NAT-PMP protocols
+  - Works on compatible routers
+
+**All automatic** - you don't need to do anything!
+
+#### Discovery Process Visualized
+
+```
+You start the app
+    ↓
+DHT bootstrap starts (background, 5-30 seconds)
+    ↓
+You join "chatroom" topic
+    ↓
+Subscribe succeeds immediately
+    ↓
+[Operations queue if DHT not ready yet]
+    ↓
+[Instant] mDNS finds Alice (same WiFi) ───→ Connected in 500ms
+    ↓
+[5-15 seconds] DHT bootstrap completes
+    ↓
+[Queued operations execute automatically]
+    ├─ Advertise "chatroom" to DHT
+    └─ Query DHT for "chatroom" peers
+    ↓
+[10-20 seconds] DHT finds Bob (different city)
+    ↓
+[15-25 seconds] DHT finds Carol (via relay)
+    ↓
+[30+ seconds] New peer Dave joins, finds you via your DHT advertisement
+    ↓
+All connected and ready to chat!
+```
+
+#### What You Need to Know
+
+**For users**:
+- **Zero configuration**: Just open the app and join a topic
+- **Immediate success**: Subscribe succeeds right away (queuing handled automatically)
+- **Be patient**: First join may take 10-30 seconds for DHT operations (bootstrap delay)
+- **Subsequent joins**: Instant (DHT already ready)
+- **Same topic name**: Ensure everyone uses exact same name (case-sensitive)
+- **Internet required**: DHT needs internet for bootstrap (first-time connection to DHT network)
+- **Local works offline**: mDNS works without internet
+- **No error messages**: "failed to find any peer in table" error is prevented by queuing
+
+**Troubleshooting**:
+- **No peers found immediately**: Normal - DHT bootstrap takes 5-30 seconds
+  - Wait for bootstrap to complete
+  - Queued operations will execute automatically
+  - Check logs with `-vv` to see bootstrap progress
+- **Only local peers**: Check internet connection for DHT bootstrap
+- **Slow first discovery**: Normal - DHT bootstrap + operations take 10-30 seconds
+  - Subsequent operations are immediate
+- **Different networks**: DHT is designed for this - wait for bootstrap and discovery
 
 ### Content-Addressed Storage (IPFS)
 
@@ -459,15 +590,74 @@ Your files organized in HAMTDirectory:
 **Problem**: No peers discovered
 
 **Possible causes**:
+- DHT bootstrap still in progress (first 5-30 seconds)
 - Not subscribed to any topics
-- Peers on different networks
+- Waiting for DHT operations to execute (queued during bootstrap)
+- Different topic names (case-sensitive)
 - Network blocks mDNS
 
 **Solutions**:
-1. Ensure all peers subscribe to same topic (e.g., "chatroom")
-2. Wait 10-30 seconds for DHT discovery
-3. Try local network first (same WiFi) for faster mDNS discovery
-4. Check peer list in UI
+1. **Wait for DHT bootstrap** (5-30 seconds after peer creation)
+   - Operations queue automatically during bootstrap
+   - No error messages displayed (queuing is transparent)
+   - Run with `-vv` to see "DHT ready" and "Processing queued operations"
+2. Ensure all peers subscribe to **exact same topic** (e.g., "chatroom") - case-sensitive!
+3. **Be patient with first subscribe** - may take 10-30 seconds for DHT operations
+   - Subsequent subscribes are immediate (DHT already ready)
+4. Check internet connection for DHT bootstrap to public IPFS nodes
+5. Try local network first (same WiFi) for faster mDNS discovery (< 1 second)
+6. Check peer list in UI
+7. Run with verbose logging to see bootstrap and queuing: `./p2p-webapp -vv`
+
+---
+
+**Problem**: Only local peers discovered, no remote peers
+
+**Possible causes**:
+- DHT bootstrap still in progress (first 5-30 seconds)
+- DHT operations queued (waiting for bootstrap)
+- No internet connection for DHT bootstrap
+- No remote peers subscribed to topic yet
+
+**Solutions**:
+1. **Wait for DHT bootstrap** to complete (5-30 seconds typical, up to 30s max)
+2. Check internet connectivity - DHT requires connection to IPFS bootstrap nodes
+3. Verify other remote peers have subscribed to the same topic
+4. Check verbose logs for DHT bootstrap and queuing status: `./p2p-webapp -vv`
+5. Look for these log messages:
+   - "Queued DHT operation" - operations queuing during bootstrap
+   - "DHT ready" - bootstrap complete
+   - "Processing N queued DHT operations" - queue executing
+   - "DHT: advertising topic..." - advertisement started
+   - "DHT: discovered peer..." - peers found via DHT
+
+---
+
+**Problem**: Peers discovered but can't connect
+
+**Possible causes**:
+- NAT/firewall blocking connections
+- No relay peers available yet
+- Network configuration issues
+
+**Solutions**:
+1. Wait for DHT to discover relay peers (automatic, takes 10-30 seconds after bootstrap)
+2. Check NAT/firewall settings on router
+3. Ensure UPnP enabled on router for automatic port mapping
+4. Try from different network to isolate issue
+5. Check verbose logs for connection errors: `./p2p-webapp -vv`
+
+---
+
+**Problem**: "failed to find any peer in table" error
+
+**This error should not occur** - operations queue automatically during DHT bootstrap.
+
+**If you see this error**:
+1. This indicates a bug - operations should queue automatically
+2. Report the issue with steps to reproduce
+3. Include verbose logs: `./p2p-webapp -vv`
+4. Check if DHT is enabled (should be by default)
 
 ### File Operation Issues
 
@@ -635,4 +825,4 @@ For detailed troubleshooting information:
 
 ---
 
-*Last updated: 2025-11-23 - Added contact list management documentation*
+*Last updated: 2025-11-24 - Added DHT topic discovery and enhanced troubleshooting*

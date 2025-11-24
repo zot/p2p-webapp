@@ -382,6 +382,431 @@ curl http://localhost:10000/
 
 ---
 
+## Peer Discovery and DHT Topic Advertisement
+
+<!-- Spec: main.md (FR11: Peer Discovery) -->
+<!-- CRC: crc-Peer.md -->
+<!-- Sequence: seq-pubsub-communication.md, seq-dht-bootstrap.md -->
+
+### Overview
+
+p2p-webapp uses **dual discovery mechanisms** working simultaneously for complete peer connectivity:
+
+1. **mDNS (Local)**: Fast discovery on same network
+2. **DHT with Topic Advertisement (Global)**: Discovery across the internet via topic subscriptions
+
+**Key feature**: DHT operations queue automatically during bootstrap, preventing "no peers in table" errors.
+
+### mDNS (Local Network Discovery)
+
+**What it is**: Multicast DNS for zero-config local peer discovery
+
+**How it works**:
+- Broadcasts presence on local network (LAN/WiFi)
+- Peers automatically discover each other
+- Sub-second discovery time
+- No configuration required
+
+**Use cases**:
+- Development on same machine/network
+- Local collaboration (same office/home)
+- Fast peer discovery for testing
+
+### DHT Bootstrap Process
+
+<!-- Sequence: seq-dht-bootstrap.md -->
+
+**What it is**: Background process that prepares the DHT for operations
+
+**When it runs**: Automatically starts when peer is created
+
+**What it does**:
+1. Connects to 3+ public IPFS bootstrap peers
+2. Runs `DHT.Bootstrap()` to populate routing table
+3. Polls `RoutingTable().Size()` every 500ms (max 30 seconds)
+4. Signals readiness when routing table has peers
+5. Executes all queued DHT operations
+
+**Timeline**:
+- **Typical**: 5-15 seconds for routing table to populate
+- **Maximum**: 30 seconds before timeout
+- **Polling**: Every 500ms to check routing table size
+
+**Operation Queuing**:
+- **Problem**: DHT operations fail with "no peers in table" if called before bootstrap completes
+- **Solution**: Operations automatically queue if DHT not ready
+- **Transparent**: Subscribe/Advertise return immediately, queuing happens internally
+- **Execution**: Queued operations execute when bootstrap completes
+
+**Implementation** (`internal/peer/manager.go`):
+```go
+// Peer struct fields
+dhtReady      chan struct{}   // Closed when DHT routing table populated
+dhtOperations []func()        // Queue of pending DHT operations
+dhtOpMu       sync.Mutex      // Protects dhtOperations queue
+
+// Bootstrap process (runs in goroutine)
+func (p *Peer) bootstrapDHT(ctx context.Context, bootstrapPeers []peer.AddrInfo) {
+    // 1. Connect to bootstrap peers (3+)
+    for _, peerInfo := range bootstrapPeers {
+        p.host.Connect(ctx, peerInfo)
+    }
+
+    // 2. Run DHT bootstrap
+    p.dht.Bootstrap(ctx)
+
+    // 3. Wait for routing table (max 30s)
+    timeout := time.After(30 * time.Second)
+    ticker := time.NewTicker(500 * time.Millisecond)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            if p.dht.RoutingTable().Size() > 0 {
+                close(p.dhtReady)  // Signal ready
+                p.processQueuedDHTOperations()  // Execute queue
+                return
+            }
+        case <-timeout:
+            close(p.dhtReady)  // Signal timeout
+            p.processQueuedDHTOperations()  // Execute anyway
+            return
+        }
+    }
+}
+
+// Enqueue or execute operation
+func (p *Peer) enqueueDHTOperation(op func()) {
+    select {
+    case <-p.dhtReady:
+        // DHT ready - execute immediately
+        op()
+    default:
+        // DHT not ready - queue operation
+        p.dhtOpMu.Lock()
+        p.dhtOperations = append(p.dhtOperations, op)
+        p.dhtOpMu.Unlock()
+    }
+}
+
+// Process queued operations (called after bootstrap)
+func (p *Peer) processQueuedDHTOperations() {
+    // Lock → extract → unlock → process pattern
+    p.dhtOpMu.Lock()
+    operations := p.dhtOperations
+    p.dhtOperations = nil
+    p.dhtOpMu.Unlock()
+
+    for _, op := range operations {
+        op()  // Execute without holding lock
+    }
+}
+```
+
+**Synchronization Hygiene**:
+- Follows lock → extract data → unlock → process pattern
+- Queue extracted under lock, then processed without lock
+- Minimizes lock duration
+- No I/O or external calls while holding lock
+
+### DHT Topic Advertisement (Global Discovery)
+
+**What it is**: Distributed Hash Table with automatic topic-based peer discovery and operation queuing
+
+**How it works**:
+
+When a peer subscribes to a topic (e.g., `client.subscribe("chatroom")`), the following happens automatically:
+
+#### 1. Topic Advertisement (Continuous)
+
+**Operation**: Queued via `enqueueDHTOperation()` if DHT not ready, executed immediately if ready
+
+- Peer advertises topic subscription to DHT using `dht.Provide(topicCID)`
+- Re-advertises periodically (every TTL/2, typically every 12 hours)
+- Continues until topic unsubscribed
+- Makes peer discoverable globally by topic interest
+- **Queues if DHT not ready** (during bootstrap, first 5-30 seconds)
+
+**Implementation** (`internal/peer/manager.go`):
+```go
+// Called from Subscribe - queues if DHT not ready
+func (p *Peer) Subscribe(topic string) error {
+    // ... GossipSub subscription ...
+
+    // Queue advertisement (may execute immediately or queue)
+    p.enqueueDHTOperation(func() {
+        go p.advertiseTopic(p.ctx, topic)
+    })
+
+    return nil
+}
+
+func (p *Peer) advertiseTopic(ctx context.Context, topic string) {
+    if p.dht == nil {
+        return // Gracefully handle missing DHT
+    }
+
+    topicCID := generateTopicCID(topic)
+
+    for {
+        // Advertise to DHT
+        ttl, err := p.dht.Provide(ctx, topicCID, true)
+        if err != nil {
+            log.Printf("DHT advertisement error: %v", err)
+        }
+
+        // Re-advertise at TTL/2 interval
+        select {
+        case <-time.After(ttl / 2):
+            continue // Re-advertise
+        case <-ctx.Done():
+            return // Stop on unsubscribe
+        }
+    }
+}
+```
+
+#### 2. Topic Peer Discovery (One-time per subscription)
+
+**Operation**: Queued via `enqueueDHTOperation()` if DHT not ready, executed immediately if ready
+
+- Queries DHT for other peers advertising the same topic using `dht.FindProviders(topicCID)`
+- Adds discovered peer addresses to peerstore with temporary TTL
+- Attempts automatic connection to each discovered peer
+- Skips self to avoid self-connection
+- **Queues if DHT not ready** (during bootstrap, first 5-30 seconds)
+
+**Implementation** (`internal/peer/manager.go`):
+```go
+// Called from Subscribe - queues if DHT not ready
+func (p *Peer) Subscribe(topic string) error {
+    // ... GossipSub subscription ...
+
+    // Queue advertisement
+    p.enqueueDHTOperation(func() {
+        go p.advertiseTopic(p.ctx, topic)
+    })
+
+    // Queue discovery (may execute immediately or queue)
+    p.enqueueDHTOperation(func() {
+        go p.discoverTopicPeers(p.ctx, topic)
+    })
+
+    return nil
+}
+
+func (p *Peer) discoverTopicPeers(ctx context.Context, topic string) {
+    if p.dht == nil {
+        return
+    }
+
+    topicCID := generateTopicCID(topic)
+
+    // Query DHT for peers
+    peerChan, err := p.dht.FindProviders(ctx, topicCID)
+    if err != nil {
+        log.Printf("DHT discovery error: %v", err)
+        return
+    }
+
+    for peerInfo := range peerChan {
+        // Skip self
+        if peerInfo.ID == p.host.ID() {
+            continue
+        }
+
+        // Add addresses with temporary TTL
+        p.host.Peerstore().AddAddrs(
+            peerInfo.ID,
+            peerInfo.Addrs,
+            peerstore.TempAddrTTL, // ~10 minutes
+        )
+
+        // Attempt connection (best-effort)
+        go p.host.Connect(ctx, peerInfo)
+    }
+}
+```
+
+#### 3. Mesh Formation Wait
+
+After starting advertisement and discovery, `Subscribe()` waits for GossipSub mesh to form (up to 5 seconds) before returning. This ensures immediate communication readiness.
+
+### Discovery Timeline
+
+**Typical timings**:
+- **mDNS discovery**: < 1 second (local network)
+- **DHT bootstrap**: 5-15 seconds (typical), max 30 seconds (timeout)
+  - Bootstrap runs automatically in background when peer created
+  - Operations queue during bootstrap (transparent to user)
+- **DHT advertisement**: 5-10 seconds (provide to DHT) - **may queue during bootstrap**
+- **DHT discovery**: 5-15 seconds (find providers) - **may queue during bootstrap**
+- **DHT propagation**: 10-30 seconds (for remote peers to discover advertisement)
+
+**First subscribe after peer creation**:
+- Subscribe returns immediately (queuing transparent)
+- Advertisement and discovery queue if bootstrap not complete
+- Operations execute automatically when bootstrap completes (5-30 seconds later)
+- Subsequent subscribes execute immediately (DHT already ready)
+
+**Verbose logging** (`-vv` flag):
+- Shows "Queued DHT operation" when operations queue
+- Shows "DHT ready" when bootstrap completes
+- Shows "Processing queued DHT operations" when queue executes
+
+### Complete Discovery Flow
+
+```
+Peer A created
+    ↓
+bootstrapDHT() goroutine starts
+    ├─ Connect to bootstrap peers
+    ├─ DHT.Bootstrap()
+    └─ Wait for routing table (5-30s)
+    ↓
+[Meanwhile] User calls Subscribe("chatroom")
+    ↓
+┌─────────────────────────────────────┐
+│ 1. GossipSub Join + Subscribe       │
+└──────────────┬──────────────────────┘
+               ↓
+┌──────────────┴──────────────────────────────────┐
+│ 2. Queue DHT operations (if DHT not ready)      │
+├──────────────────────────────────────────────────┤
+│ • enqueueDHTOperation(advertiseTopic)           │
+│ • enqueueDHTOperation(discoverTopicPeers)       │
+│ [Operations queue or execute based on DHT state] │
+└──────────────┬───────────────────────────────────┘
+               ↓
+    Subscribe() returns immediately
+           ↓
+       ┌───────┴────────┐
+       ↓                ↓
+┌──────────┐    ┌────────────────────────────────┐
+│ mDNS     │    │ DHT Bootstrap (background)      │
+│ (local)  │    │ (5-30 seconds)                  │
+└────┬─────┘    └────┬───────────────────────────┘
+     ↓               ↓
+     │          DHT routing table populated
+     │               ↓
+     │          Close dhtReady channel
+     │               ↓
+     │          Process queued operations:
+     │          ├─ advertiseTopic() → DHT.Provide()
+     │          └─ discoverTopicPeers() → DHT.FindProviders()
+     │               ↓
+     ├─→ Peer B (local network, ~500ms via mDNS)
+     ↓
+     ├─→ Peer C (remote, via DHT, ~15s after bootstrap)
+     ↓
+     └─→ Peer D (remote, via relay, ~20s after bootstrap)
+     ↓
+┌──────────────────────┐
+│ Mesh formation wait  │
+│ (up to 5 seconds)    │
+└──────────┬───────────┘
+           ↓
+   Ready for messaging
+```
+
+### Benefits of DHT Topic Discovery
+
+**Geographic Reach**:
+- Peers on different networks can find each other
+- Enables global collaboration without known relay addresses
+- Works across NAT/firewalls via discovered relays
+
+**Automatic Connections**:
+- No manual peer exchange needed
+- Shared topic interest drives discovery
+- Connections attempted automatically
+
+**Resilient to Changes**:
+- Continuous re-advertisement maintains discoverability
+- New peers discover existing peers via DHT query
+- Handles network changes (IP address changes, reconnections)
+
+**Complements mDNS**:
+- Fast local discovery (mDNS) + slow global discovery (DHT)
+- Best of both worlds for different scenarios
+- No configuration needed - both work simultaneously
+
+### Use Cases
+
+**Local Development**: mDNS provides fast discovery on localhost or same network
+
+**Distributed Teams**: DHT enables peers on different office networks to collaborate
+
+**Public Applications**: DHT allows users on home networks to discover each other
+
+**Mobile Users**: DHT handles network changes as mobile devices move between networks
+
+**NAT Traversal**: Discovered peers may act as relays for NAT/firewall traversal
+
+### Implementation Notes
+
+**No manual configuration**: Both mDNS and DHT work automatically when peer starts
+
+**Bootstrap nodes**: DHT uses public IPFS bootstrap nodes (configured in peer creation)
+
+**Topic CID generation**: Topic name hashed to CID for DHT storage
+
+**Advertisement persistence**: Continues until unsubscribe, survives network changes
+
+**Discovery timing**: Query happens once per subscription (not continuous polling)
+
+**Connection attempts**: Best-effort, failures logged but don't block discovery
+
+**Graceful degradation**: Works without DHT (DHT nil check), falls back to mDNS only
+
+### Debugging DHT Discovery
+
+**Check DHT bootstrap and queuing**:
+```bash
+# Run with medium verbosity to see queuing
+./p2p-webapp -vv
+
+# Look for DHT-related logs:
+# - "Queued DHT operation: ..." (operations queued during bootstrap)
+# - "DHT ready" (bootstrap complete)
+# - "Processing N queued DHT operations" (executing queue)
+# - "DHT: advertising topic..."
+# - "DHT: discovered peer..."
+# - "DHT: connected to peer..."
+```
+
+**Common issues**:
+- **"failed to find any peer in table"**: This error is now prevented by queuing system
+  - If you see this error, it indicates a bug (operations should queue automatically)
+- **No DHT bootstrap**: Check internet connectivity to IPFS bootstrap nodes
+- **Slow initial discovery**: Normal - operations queue during bootstrap (5-30 seconds)
+  - First subscribe may take 10-30 seconds for DHT operations to execute
+  - Subsequent subscribes execute immediately
+- **No peers found after bootstrap**: Ensure other peers subscribed to exact same topic name (case-sensitive)
+- **Connection failures**: Check NAT/firewall settings, relay discovery may help
+- **Bootstrap timeout**: If routing table doesn't populate in 30 seconds, operations execute anyway (may fail)
+
+**Test locally**:
+```bash
+# Terminal 1
+./p2p-webapp -vv
+
+# Terminal 2
+./p2p-webapp -vv -p 10001
+
+# Both subscribe to "test-topic"
+# Watch logs for:
+# - Immediate subscribe success (even if DHT not ready)
+# - "Queued DHT operation" messages (if bootstrap not complete)
+# - "DHT ready" when bootstrap completes
+# - "Processing queued DHT operations" (queue execution)
+# - mDNS discovery (fast, ~1 second)
+# - DHT discovery (slower, after bootstrap completes)
+```
+
+---
+
 ## Configuration
 
 ### Configuration File
@@ -1232,4 +1657,4 @@ cd pkg/client && npm test
 
 ---
 
-*Last updated: Initial developer guide from CRC design*
+*Last updated: 2025-11-24 - Added comprehensive DHT Topic Discovery section*

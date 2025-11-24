@@ -40,8 +40,15 @@
 - seq-peer-creation.md
 - seq-protocol-communication.md
 - seq-pubsub-communication.md
+- seq-dht-bootstrap.md
+- seq-add-peers.md
+- seq-remove-peers.md
 - seq-list-files.md
 - seq-store-file.md
+- seq-get-file.md
+
+**Test Designs:**
+- test-dht-bootstrap.md
 
 **Architecture:**
 - architecture.md
@@ -142,6 +149,18 @@
   - [ ] RemovePeer() comment
   - [ ] Bootstrap() comment
   - [ ] allowPrivateGater type comment
+  - [x] advertiseTopic() comment → seq-pubsub-communication.md (DHT topic advertisement)
+  - [x] discoverTopicPeers() comment → seq-pubsub-communication.md (DHT peer discovery)
+
+**DHT bootstrap and queuing implemented:**
+  - ✅ bootstrapDHT() → seq-dht-bootstrap.md
+  - ✅ enqueueDHTOperation() → seq-dht-bootstrap.md
+  - ✅ processQueuedDHTOperations() → seq-dht-bootstrap.md
+  - ✅ retryAddedPeersLoop() (uses DHT for retry)
+  - [ ] bootstrapDHT() comment → seq-dht-bootstrap.md
+  - [ ] enqueueDHTOperation() comment → seq-dht-bootstrap.md
+  - [ ] processQueuedDHTOperations() comment → seq-dht-bootstrap.md
+  - [ ] retryAddedPeersLoop() comment
 
 **File operations implemented:**
   - ✅ ListFiles() → seq-list-files.md
@@ -158,6 +177,18 @@
   - [ ] File header referencing CRC card
 - **internal/peer/virtual_connection_test.go** ✅ EXISTS (tests VirtualConnectionManager)
   - [ ] File header referencing CRC card
+- **tests/peer_dht_test.go** ❌ DOES NOT EXIST (DHT bootstrap tests)
+  - [ ] File header → test-dht-bootstrap.md
+  - [ ] Test DHT bootstrap success
+  - [ ] Test DHT bootstrap timeout
+  - [ ] Test operation queuing before bootstrap
+  - [ ] Test operation immediate execution after bootstrap
+  - [ ] Test multiple queued operations
+  - [ ] Test no DHT case
+  - [ ] Test enqueueDHTOperation thread safety
+  - [ ] Test processQueuedDHTOperations synchronization
+  - [ ] Test bootstrap peer connection
+  - [ ] Test bootstrap routing table polling
 
 ---
 
