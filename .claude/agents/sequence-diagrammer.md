@@ -2,7 +2,7 @@
 name: sequence-diagrammer
 description: Convert sequence diagrams to PlantUML ASCII format using the plantuml skill. Invoke when creating or converting sequence diagrams to ensure consistent PlantUML formatting.
 tools: Skill, Read, Write, Edit, Bash
-model: sonnet
+model: opus
 ---
 
 # Diagram Converter Agent

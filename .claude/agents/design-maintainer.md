@@ -2,7 +2,7 @@
 name: design-maintainer
 description: Maintain design specs when implementation code changes. Updates CRC cards, sequences, and adds traceability comments when code evolves.
 tools: Read, Write, Edit, Glob, Grep
-model: sonnet
+model: opus
 ---
 
 # Design Maintainer Agent

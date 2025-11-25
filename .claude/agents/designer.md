@@ -2,7 +2,7 @@
 name: designer
 description: Generate design (Level 2: CRC cards, sequence diagrams, UI specs) from Level 1 human-written specs. Invoke when creating formal design models from requirements.
 tools: Read, Write, Edit, Bash, Grep, Glob, Skill, Task
-model: sonnet
+model: opus
 ---
 
 # Design Generator Agent

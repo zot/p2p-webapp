@@ -2,7 +2,7 @@
 name: release
 description: Create a new release with version bump, cross-platform binary builds, git tag, and GitHub release. Handles the complete release workflow.
 tools: Read, Write, Edit, Bash, Grep
-model: sonnet
+model: opus
 ---
 
 # Release Agent

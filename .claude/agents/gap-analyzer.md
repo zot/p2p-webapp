@@ -2,7 +2,7 @@
 name: gap-analyzer
 description: Generate comprehensive gap analysis for CRC modeling projects. Analyzes completeness and quality by comparing Level 1 specs to Level 2 design to Level 3 implementation.
 tools: Read, Write, Glob, Grep
-model: sonnet
+model: opus
 ---
 
 # Gap Analyzer Agent

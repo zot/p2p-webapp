@@ -2,7 +2,7 @@
 name: documenter
 description: Generate comprehensive documentation (requirements, design, developer guide, user manual) from specs and design models. Invoke when creating project documentation.
 tools: Read, Write, Edit, Bash, Grep, Glob
-model: sonnet
+model: opus
 ---
 
 # Documenter Agent

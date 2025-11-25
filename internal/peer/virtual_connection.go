@@ -23,17 +23,18 @@ type VirtualConnectionManager struct {
 
 // MessageQueue holds messages for a specific (peer, protocol) pair
 type MessageQueue struct {
-	peer             string
-	protocol         string
-	messages         []QueuedMessage
-	stream           network.Stream
-	retryCount       int
-	unreachable      bool
-	lastActivity     time.Time
-	processing       bool
-	mu               sync.Mutex
-	manager          *VirtualConnectionManager
-	streamReaderDone chan struct{}
+	peer                 string
+	protocol             string
+	messages             []QueuedMessage
+	stream               network.Stream
+	retryCount           int
+	unreachable          bool
+	lastActivity         time.Time
+	processing           bool
+	mu                   sync.Mutex
+	manager              *VirtualConnectionManager
+	streamReaderDone     chan struct{}
+	streamReaderDoneOnce sync.Once
 }
 
 // QueuedMessage represents a message in the queue
@@ -218,6 +219,9 @@ func (q *MessageQueue) ensureStream() error {
 
 	q.stream = stream
 	q.lastActivity = time.Now()
+	// Reset the done channel and Once for the new stream reader
+	q.streamReaderDone = make(chan struct{})
+	q.streamReaderDoneOnce = sync.Once{}
 
 	// Start reading ACKs and data from stream
 	go q.readFromStream()
@@ -305,7 +309,9 @@ func (q *MessageQueue) handleSendFailure(msgID string) {
 // readFromStream reads messages from the stream
 func (q *MessageQueue) readFromStream() {
 	defer func() {
-		close(q.streamReaderDone)
+		q.streamReaderDoneOnce.Do(func() {
+			close(q.streamReaderDone)
+		})
 	}()
 
 	q.mu.Lock()
@@ -480,6 +486,9 @@ func (vcm *VirtualConnectionManager) HandleIncomingStream(stream network.Stream)
 	}
 	queue.stream = stream
 	queue.lastActivity = time.Now()
+	// Reset the done channel and Once for the new stream reader
+	queue.streamReaderDone = make(chan struct{})
+	queue.streamReaderDoneOnce = sync.Once{}
 	queue.mu.Unlock()
 
 	// Log incoming connection
