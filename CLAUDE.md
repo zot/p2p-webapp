@@ -7,6 +7,7 @@
 - Use **SOLID principles** in all implementations
 - Create comprehensive **unit tests** for all components
 - code and specs are as MINIMAL as POSSIBLE
+- **Never commit without user permission**
 
 ## 🔒 Synchronization Hygiene (Go Concurrency)
 
@@ -30,6 +31,12 @@
 - Methods like `withResource(func(...))` maximize lock time
 - Only use when unavoidable (since methods can't leave locks held)
 - Prefer: lock → copy data → unlock → work with copy
+
+### 4. Shared Queue Processing
+- When processing queued operations, **spawn goroutines** for each operation
+- Never run queued operations synchronously if they may block (I/O, timeouts, long-running loops)
+- Pattern: `for _, op := range operations { go op() }` not `for _, op := range operations { op() }`
+- This prevents one slow operation from blocking subsequent operations
 
 **For detailed patterns, examples, and anti-patterns, see the Synchronization Hygiene section in `docs/developer-guide.md`.**
 

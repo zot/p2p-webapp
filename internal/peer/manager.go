@@ -1231,10 +1231,28 @@ func (p *Peer) advertiseTopic(topic string, handler *TopicHandler) {
 	p.enqueueDHTOperation(func() {
 		routingDiscovery := discoveryrouting.NewRoutingDiscovery(p.dht)
 
-		// Initial advertisement
-		ttl, err := routingDiscovery.Advertise(p.ctx, topic)
+		// Initial advertisement with retry
+		var ttl time.Duration
+		var err error
+		for attempt := 1; attempt <= 3; attempt++ {
+			ttl, err = routingDiscovery.Advertise(p.ctx, topic)
+			if err == nil {
+				break
+			}
+			p.logVerbose(1, "Failed to advertise topic %s to DHT (attempt %d/3): %v", topic, attempt, err)
+			if attempt < 3 {
+				select {
+				case <-p.ctx.Done():
+					return
+				case <-handler.ctx.Done():
+					return
+				case <-time.After(time.Duration(attempt*2) * time.Second):
+					// Exponential backoff: 2s, 4s
+				}
+			}
+		}
 		if err != nil {
-			p.logVerbose(1, "Failed to advertise topic %s to DHT: %v", topic, err)
+			p.logVerbose(1, "Giving up advertising topic %s to DHT after 3 attempts", topic)
 			return
 		}
 		p.logVerbose(2, "Advertised topic %s to DHT (TTL: %v)", topic, ttl)
@@ -1286,6 +1304,11 @@ func (p *Peer) discoverTopicPeers(topic string) {
 			}
 
 			p.logVerbose(2, "Discovered peer %s for topic %s via DHT (addrs: %d)", peer.ID.String(), topic, len(peer.Addrs))
+
+			// Skip peers with no addresses - they can't be connected to
+			if len(peer.Addrs) == 0 {
+				continue
+			}
 
 			// Add addresses to peerstore with temporary TTL
 			p.host.Peerstore().AddAddrs(peer.ID, peer.Addrs, peerstore.TempAddrTTL)
@@ -1579,12 +1602,13 @@ func (p *Peer) processQueuedDHTOperations() {
 	if len(operations) > 0 {
 		p.logVerbose(2, "Processing %d queued DHT operations", len(operations))
 		for _, op := range operations {
-			op() // Execute each queued operation
+			go op() // Spawn each queued operation in its own goroutine
 		}
 	}
 }
 
-// enqueueDHTOperation queues a DHT operation or executes it immediately if DHT is ready
+// enqueueDHTOperation queues a DHT operation or spawns it immediately if DHT is ready
+// Operations always run in their own goroutine to avoid blocking the queue
 // This ensures DHT operations don't fail with "no peers in table" errors
 // CRC: crc-Peer.md
 // Spec: main.md
@@ -1593,8 +1617,8 @@ func (p *Peer) enqueueDHTOperation(op func()) {
 	// Check if DHT is ready using non-blocking select
 	select {
 	case <-p.dhtReady:
-		// DHT is ready, execute immediately
-		op()
+		// DHT is ready, spawn goroutine immediately
+		go op()
 	default:
 		// DHT not ready yet, queue the operation
 		p.dhtOpMu.Lock()

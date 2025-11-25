@@ -326,7 +326,8 @@ func (q *MessageQueue) readFromStream() {
 		data, err := readMessage(stream)
 		if err != nil {
 			if err != io.EOF {
-				fmt.Printf("Error reading from stream: %v\n", err)
+				peerAlias := q.manager.peer.manager.getOrCreateAlias(q.peer)
+				q.manager.peer.logVerbose(2, "Error reading from stream to %s on protocol %s: %v", peerAlias, q.protocol, err)
 			}
 			q.mu.Lock()
 			q.closeStreamLocked()
@@ -336,7 +337,8 @@ func (q *MessageQueue) readFromStream() {
 
 		var streamMsg StreamMessage
 		if err := json.Unmarshal(data, &streamMsg); err != nil {
-			fmt.Printf("Error unmarshaling stream message: %v\n", err)
+			peerAlias := q.manager.peer.manager.getOrCreateAlias(q.peer)
+			q.manager.peer.logVerbose(1, "Error unmarshaling stream message from %s: %v", peerAlias, err)
 			continue
 		}
 

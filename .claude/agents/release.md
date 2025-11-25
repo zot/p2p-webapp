@@ -165,7 +165,6 @@ Create GitHub Release with Binaries
 3. **Stage changes:**
    ```bash
    git add internal/commands/version.go
-   git add build/release/
    ```
 
 ---
@@ -402,7 +401,7 @@ Release binaries ready in build/release/
 
 **Step 6: Create Commit**
 ```bash
-$ git add internal/commands/version.go build/release/
+$ git add internal/commands/version.go
 $ git commit -m "Release v1.0.0
 
 - Update version to 1.0.0
@@ -567,3 +566,5 @@ chmod +x p2p-webapp-*
 - **Tag Before Push:** Create tag locally first, then push both commit and tag
 
 - **Verify Release:** Always check the GitHub release URL after creation and test downloading binaries
+
+- **Release Binaries Not Committed:** The files in `build/release/*` are NOT committed to git. They are only attached to the GitHub release. The `.gitignore` excludes the `build/` directory.
