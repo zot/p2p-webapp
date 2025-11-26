@@ -305,6 +305,44 @@
             background: #c0392b;
         }
 
+        /* Peer status indicators */
+        .peer-item .peer-header {
+            display: flex;
+            align-items: center;
+        }
+
+        .peer-item .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+
+        .peer-item .status-dot.connected {
+            background: #4CAF50;
+        }
+
+        .peer-item .status-dot.partial {
+            background: #FFC107;
+        }
+
+        .peer-item .status-dot.offline {
+            background: #9E9E9E;
+        }
+
+        .peer-item.active .status-dot.connected {
+            background: #81C784;
+        }
+
+        .peer-item.active .status-dot.partial {
+            background: #FFD54F;
+        }
+
+        .peer-item.active .status-dot.offline {
+            background: #BDBDBD;
+        }
+
         /* File Browser Modal */
         #file-browser-modal {
             display: none;
@@ -735,10 +773,11 @@
 
         let currentMode = 'room'; // 'room' or 'dm'
         let currentPeerID = null;
-        let peers = new Map(); // peerID -> { name }
+        let peers = new Map(); // peerID -> { name, inTopic, isContact, directConnected }
         let dmMessages = new Map(); // peerID -> [{text, isOwn, timestamp}]
         let roomMessages = []; // Store room messages: [{senderPeerID, text, isOwn, timestamp}]
         let unreadCounts = new Map(); // peerID -> number of unread messages
+        let pingCheckInterval = null; // Interval for periodic ping checks
 
         // File browser state
         const fileBrowserModal = document.getElementById('file-browser-modal');
@@ -902,58 +941,156 @@
             updateUnreadBadge(peerID);
         }
 
-        function addPeerToList(peerID, name) {
-            if (peerID === client.peerID) return; // Don't add ourselves
-            if (document.querySelector(`[data-peer-id="${peerID}"]`)) return; // Already exists
+        // Note: Ping-based connection check removed - waitForAck only confirms local
+        // server processed the request, not that the remote peer received it.
+        // Contacts show as offline (gray) until they join the topic (green).
 
-            const peerItem = document.createElement('div');
-            peerItem.className = 'peer-item';
-            peerItem.setAttribute('data-peer-id', peerID);
+        // Placeholder for future ping-pong protocol implementation
+        async function refreshContactConnections() {
+            // Currently no-op since we can't reliably ping peers
+            // Future: implement proper ping-pong with timeout
+            renderPeerList();
+        }
 
-            const nameDiv = document.createElement('div');
-            nameDiv.className = 'peer-name';
-            nameDiv.textContent = name || 'Peer';
+        // Get the status class for a peer
+        function getPeerStatusClass(peerData) {
+            if (peerData.inTopic) return 'connected';
+            if (peerData.directConnected) return 'partial';
+            return 'offline';
+        }
 
-            const idDiv = document.createElement('div');
-            idDiv.className = 'peer-id';
-            idDiv.textContent = '...' + peerID.slice(-16);
+        // Render the entire peer list from the peers Map
+        function renderPeerList() {
+            // Save the room item first
+            const roomItem = peerList.querySelector('.peer-item.room');
 
-            peerItem.appendChild(nameDiv);
-            peerItem.appendChild(idDiv);
+            // Clear all non-room items
+            const items = peerList.querySelectorAll('.peer-item:not(.room)');
+            items.forEach(item => item.remove());
 
-            peerItem.addEventListener('click', () => {
-                switchToDM(peerID);
+            // Clear peer selector options (except first placeholder if any)
+            const options = peerSelector.querySelectorAll('option:not([value=""])');
+            options.forEach(opt => opt.remove());
+
+            // Sort peers: connected first, then partial, then offline
+            const sortedPeers = [...peers.entries()].sort((a, b) => {
+                const statusOrder = { connected: 0, partial: 1, offline: 2 };
+                const aStatus = getPeerStatusClass(a[1]);
+                const bStatus = getPeerStatusClass(b[1]);
+                return statusOrder[aStatus] - statusOrder[bStatus];
             });
 
-            peerList.appendChild(peerItem);
+            // Render each peer
+            for (const [peerID, data] of sortedPeers) {
+                if (peerID === client.peerID) continue;
 
-            // Add to peer selector
-            const option = document.createElement('option');
-            option.value = peerID;
-            option.textContent = name || `Peer ...${peerID.slice(-8)}`;
-            peerSelector.appendChild(option);
+                const statusClass = getPeerStatusClass(data);
+                const peerItem = document.createElement('div');
+                peerItem.className = 'peer-item';
+                peerItem.setAttribute('data-peer-id', peerID);
 
-            // Initialize unread count badge if needed
-            updateUnreadBadge(peerID);
+                // Create header with status dot and name
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'peer-header';
+
+                const statusDot = document.createElement('span');
+                statusDot.className = `status-dot ${statusClass}`;
+
+                const nameDiv = document.createElement('div');
+                nameDiv.className = 'peer-name';
+                nameDiv.textContent = data.name || 'Peer';
+
+                headerDiv.appendChild(statusDot);
+                headerDiv.appendChild(nameDiv);
+
+                const idDiv = document.createElement('div');
+                idDiv.className = 'peer-id';
+                idDiv.textContent = '...' + peerID.slice(-16);
+
+                peerItem.appendChild(headerDiv);
+                peerItem.appendChild(idDiv);
+
+                peerItem.addEventListener('click', () => {
+                    switchToDM(peerID);
+                });
+
+                peerList.appendChild(peerItem);
+
+                // Add to peer selector
+                const option = document.createElement('option');
+                option.value = peerID;
+                option.textContent = data.name || `Peer ...${peerID.slice(-8)}`;
+                peerSelector.appendChild(option);
+
+                // Update unread badge
+                updateUnreadBadge(peerID);
+            }
+
+            // Re-apply active state if in DM mode
+            if (currentMode === 'dm' && currentPeerID) {
+                const activeItem = peerList.querySelector(`[data-peer-id="${currentPeerID}"]`);
+                if (activeItem) {
+                    activeItem.classList.add('active');
+                }
+            } else if (currentMode === 'room' && roomItem) {
+                roomItem.classList.add('active');
+            }
+        }
+
+        // Update a peer's topic status and re-render
+        function setPeerInTopic(peerID, inTopic) {
+            if (peerID === client.peerID) return;
+
+            const existing = peers.get(peerID);
+            if (existing) {
+                existing.inTopic = inTopic;
+                if (inTopic) existing.directConnected = true; // If in topic, must be connected
+                peers.set(peerID, existing);
+            } else if (inTopic) {
+                // New peer from topic
+                peers.set(peerID, {
+                    name: `Peer ...${peerID.slice(-8)}`,
+                    inTopic: true,
+                    isContact: false,
+                    directConnected: true
+                });
+            }
+            renderPeerList();
+        }
+
+        // Handle peer leaving topic - only remove from list if not a contact
+        function handlePeerLeftTopic(peerID) {
+            const peerData = peers.get(peerID);
+            if (peerData) {
+                peerData.inTopic = false;
+                peerData.directConnected = false; // Will be checked on next ping
+                if (!peerData.isContact) {
+                    // Not a contact, remove entirely
+                    peers.delete(peerID);
+                    // If we were DMing with this peer, switch back to room
+                    if (currentMode === 'dm' && currentPeerID === peerID) {
+                        updateMode('room');
+                    }
+                } else {
+                    peers.set(peerID, peerData);
+                }
+            }
+            renderPeerList();
+        }
+
+        // Legacy function names for compatibility
+        function addPeerToList(peerID, name) {
+            setPeerInTopic(peerID, true);
+            // Update name if provided
+            const peerData = peers.get(peerID);
+            if (peerData && name) {
+                peerData.name = name;
+                peers.set(peerID, peerData);
+            }
         }
 
         function removePeerFromList(peerID) {
-            const peerItem = document.querySelector(`[data-peer-id="${peerID}"]`);
-            if (peerItem && !peerItem.classList.contains('room')) {
-                peerItem.remove();
-                peers.delete(peerID);
-
-                // Remove from peer selector
-                const option = peerSelector.querySelector(`option[value="${peerID}"]`);
-                if (option) {
-                    option.remove();
-                }
-
-                // If we were DMing with this peer, switch back to room
-                if (currentMode === 'dm' && currentPeerID === peerID) {
-                    updateMode('room');
-                }
-            }
+            handlePeerLeftTopic(peerID);
         }
 
         function displayStoredMessages(peerID) {
@@ -1354,7 +1491,45 @@
 
                 // Update session state
                 currentContacts = new Set(modalContacts);
+
+                // Update peers Map with contact status
+                for (const peerID of added) {
+                    const existing = peers.get(peerID);
+                    if (existing) {
+                        existing.isContact = true;
+                        peers.set(peerID, existing);
+                    } else {
+                        // New contact not in topic - add to peers and check connection
+                        peers.set(peerID, {
+                            name: `Peer ...${peerID.slice(-8)}`,
+                            inTopic: false,
+                            isContact: true,
+                            directConnected: false // Will be checked
+                        });
+                    }
+                }
+
+                // Mark removed contacts as not contacts
+                for (const peerID of removed) {
+                    const existing = peers.get(peerID);
+                    if (existing) {
+                        existing.isContact = false;
+                        // If not in topic and not a contact, remove entirely
+                        if (!existing.inTopic) {
+                            peers.delete(peerID);
+                        } else {
+                            peers.set(peerID, existing);
+                        }
+                    }
+                }
+
                 contactsModal.classList.remove('active');
+
+                // Re-render and check connections for new contacts
+                renderPeerList();
+                if (added.length > 0) {
+                    refreshContactConnections();
+                }
             } catch (error) {
                 console.error('Error updating contacts:', error);
                 alert('Failed to update contacts: ' + error.message);
@@ -1500,7 +1675,6 @@
 
                         if (joined) {
                             addPeerToList(peerID, `Peer ...${peerID.slice(-8)}`);
-                            peers.set(peerID, { name: `Peer ...${peerID.slice(-8)}` });
                         } else {
                             removePeerFromList(peerID);
                         }
@@ -1516,12 +1690,16 @@
                     for (const peerID of peerIDs) {
                         if (peerID !== client.peerID) {
                             addPeerToList(peerID, `Peer ...${peerID.slice(-8)}`);
-                            peers.set(peerID, { name: `Peer ...${peerID.slice(-8)}` });
                         }
                     }
                 } catch (error) {
                     console.error('Failed to get initial peer list:', error);
                 }
+
+                // Start periodic ping check for contacts (every 30 seconds)
+                pingCheckInterval = setInterval(() => {
+                    refreshContactConnections();
+                }, 30000);
 
                 messageInput.disabled = false;
                 sendButton.disabled = false;
