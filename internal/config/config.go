@@ -75,8 +75,9 @@ type FilesConfig struct {
 
 // P2PConfig holds P2P protocol settings
 type P2PConfig struct {
-	ProtocolName            string `toml:"protocolName"`
-	FileUpdateNotifyTopic   string `toml:"fileUpdateNotifyTopic"`
+	ProtocolName            string   `toml:"protocolName"`
+	FileUpdateNotifyTopic   string   `toml:"fileUpdateNotifyTopic"`
+	IPFSGetTimeout          Duration `toml:"ipfsGetTimeout"`
 }
 
 // Duration wraps time.Duration for TOML parsing

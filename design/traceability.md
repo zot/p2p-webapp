@@ -34,6 +34,8 @@
 - crc-ProcessTracker.md
 - crc-P2PWebAppClient.md
 - crc-CommandRouter.md
+- crc-ConfigLoader.md
+- crc-Peer.md
 
 **Sequence Diagrams:**
 - seq-server-startup.md
@@ -49,6 +51,15 @@
 
 **Test Designs:**
 - test-dht-bootstrap.md
+- test-Server.md
+- test-PeerManager.md
+- test-WebSocketHandler.md
+- test-BundleManager.md
+- test-P2PWebAppClient.md
+- test-ConfigLoader.md
+- test-ProcessTracker.md
+- test-WebServer-CommandRouter.md
+- test-Peer.md
 
 **Architecture:**
 - architecture.md
@@ -368,6 +379,51 @@
   - [ ] File header referencing CRC card
 - **internal/commands/ps_integration_test.go** ✅ EXISTS (integration test for ps command)
   - [ ] File header referencing CRC card
+
+---
+
+### crc-ConfigLoader.md
+
+**Source Spec:** main.md
+
+**Implementation:**
+- **internal/config/config.go** ✅ EXISTS
+  - [x] File header (CRC + Spec)
+  - [x] Config struct
+  - [x] P2PConfig with IPFSGetTimeout
+  - [x] Duration type for TOML parsing
+
+- **internal/config/defaults.go** ✅ EXISTS
+  - [x] File header (CRC + Spec)
+  - [x] DefaultConfig() function
+
+- **internal/config/loader.go** ✅ EXISTS
+  - [x] File header (CRC + Spec)
+  - [x] LoadFromDir()
+  - [x] LoadFromZIP()
+  - [x] Merge()
+  - [x] Validate()
+
+**Tests:**
+- **design/test-ConfigLoader.md** ✅ EXISTS
+
+---
+
+### crc-Peer.md
+
+**Source Spec:** main.md
+
+**Implementation:**
+- **internal/peer/manager.go** ✅ EXISTS (Peer struct defined here)
+  - [x] File header (CRC + Spec + Sequences)
+  - [x] Peer struct
+  - [x] GetFile() with configurable timeout → seq-get-file.md
+  - [x] requestFileFromPeer() → seq-get-file.md
+  - [x] handleGetFile() → seq-get-file.md
+  - [x] handleFileContent() → seq-get-file.md
+
+**Tests:**
+- **design/test-Peer.md** ✅ EXISTS
 
 ---
 

@@ -72,12 +72,15 @@
 **Design Documentation** (`docs/design.md`):
 - System Components section:
   - [x] crc-Server.md → Server Orchestrator component
-  - [x] crc-Server.md → WebServer component
+  - [x] crc-WebServer.md → WebServer component
   - [x] crc-WebSocketHandler.md → WebSocketHandler component
   - [x] crc-PeerManager.md → PeerManager component
-  - [x] crc-PeerManager.md → Peer component
+  - [x] crc-Peer.md → Peer component
   - [x] crc-BundleManager.md → BundleManager component
   - [x] crc-ProcessTracker.md → ProcessTracker component
+  - [x] crc-ConfigLoader.md → ConfigLoader component
+  - [x] crc-CommandRouter.md → CommandRouter component
+  - [x] crc-P2PWebAppClient.md → P2PWebAppClient component
 - Design Patterns section:
   - [x] Virtual Connection Model (from crc-PeerManager.md)
   - [x] Sequential Message Processing (from crc-WebSocketHandler.md)
@@ -99,17 +102,26 @@
 
 **Design Documentation** (`docs/design.md`):
 - Data Flow section:
+  - [x] seq-server-startup.md → Server Startup Flow
   - [x] seq-peer-creation.md → Peer Creation Flow
   - [x] seq-protocol-communication.md → Protocol Communication Flow
-  - [x] seq-file-operations.md → File Storage Flow
-  - [x] seq-file-operations.md → File Listing Flow
+  - [x] seq-pubsub-communication.md → PubSub Communication Flow
+  - [x] seq-add-peers.md → Add Peers Flow
+  - [x] seq-remove-peers.md → Remove Peers Flow
+  - [x] seq-list-files.md → File Listing Flow
+  - [x] seq-get-file.md → File Retrieval Flow
+  - [x] seq-store-file.md → File Storage Flow
+  - [x] seq-dht-bootstrap.md → DHT Bootstrap Flow
   - [x] File Update Notification Flow (from crc-PeerManager.md)
 
 **User Manual** (`docs/user-manual.md`):
 - Chat Features:
   - [x] seq-protocol-communication.md → Direct Messages workflow
+  - [x] seq-pubsub-communication.md → Room chat workflow
 - File Sharing Features:
-  - [x] seq-file-operations.md → Uploading, listing, downloading workflows
+  - [x] seq-store-file.md → Uploading workflow
+  - [x] seq-list-files.md → Listing workflow
+  - [x] seq-get-file.md → Downloading workflow
 
 ### UI Specifications
 
@@ -150,8 +162,8 @@
 - Unreferenced specs: None
 
 **Design Coverage**:
-- CRC cards documented: 7 (Server, WebSocketHandler, PeerManager, Peer, BundleManager, ProcessTracker, references to others)
-- Sequences documented: 3 (peer-creation, protocol-communication, file-operations)
+- CRC cards documented: 10 (Server, WebServer, WebSocketHandler, PeerManager, Peer, BundleManager, ProcessTracker, ConfigLoader, CommandRouter, P2PWebAppClient)
+- Sequences documented: 10 (server-startup, peer-creation, protocol-communication, pubsub-communication, add-peers, remove-peers, list-files, get-file, store-file, dht-bootstrap)
 - Additional flows documented: 1 (File Update Notification Flow)
 
 **Feature Documentation Status**:
@@ -167,9 +179,10 @@
 - No formal UI specifications (design/ui-*.md files)
   - Demo UI patterns are documented directly in user-manual.md
   - Could be formalized in future if needed
-- Test designs not yet created
-  - Would go in design/test-*.md files
-  - Referenced in developer-guide.md testing section
+
+**Test Design Coverage**:
+- Test designs exist: 10 files (design/test-*.md)
+- See design/traceability-tests.md for test design traceability
 
 ## Maintenance Notes
 
@@ -197,4 +210,4 @@
 
 ---
 
-*Last updated: 2025-11-20 - Initial documentation traceability map with file notification feature*
+*Last updated: 2025-11-26 - Updated with all 10 CRC cards, 10 sequences, and test design coverage*

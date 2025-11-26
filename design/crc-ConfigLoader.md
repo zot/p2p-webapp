@@ -68,6 +68,7 @@
 ### P2PConfig
 - ProtocolName: Reserved libp2p protocol name for file list queries
 - FileUpdateNotifyTopic: Optional topic for file availability notifications
+- IPFSGetTimeout: Timeout for IPFS Get operations before falling back to peer
 
 ## Key Points
 
@@ -91,6 +92,7 @@
 - SPA fallback enabled
 - Protocol name: "/p2p-webapp/1.0.0"
 - File update notifications: disabled (empty topic)
+- IPFS Get timeout: 3 seconds
 
 ## Sequences
 

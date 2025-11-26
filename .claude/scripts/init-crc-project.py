@@ -134,6 +134,9 @@ Level 3: Implementation (source code)
 - ✅ Correct: `CRC: crc-Person.md`, `Spec: main.md`, `Sequence: seq-create-user.md`
 - ❌ Wrong: `CRC: design/crc-Person.md`, `Spec: specs/main.md`
 
+**Finding Implementations:**
+- To find where a design element is implemented, grep for its filename (e.g., `grep "seq-get-file.md"`)
+
 **Test Implementation:**
 - **Test designs are Level 2 artifacts**: Designer agent automatically generates test design specs (`design/test-*.md`) via the test-designer sub-agent
 - **ALWAYS read test designs BEFORE writing test code**: Test designs specify what to test, test code implements those specifications

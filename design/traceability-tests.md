@@ -41,6 +41,7 @@
 - test-ConfigLoader.md
 - test-ProcessTracker.md
 - test-WebServer-CommandRouter.md
+- test-dht-bootstrap.md
 
 ---
 
@@ -53,9 +54,9 @@
 **Source Sequences**: seq-server-startup.md
 
 **Test Implementation:**
-- **tests/internal/server/server_test.go**
+- **internal/server/server_test.go** ✅ EXISTS
   - [ ] File header referencing test design
-  - [ ] Test: Server startup with available port
+  - [x] Test: Server startup with available port
   - [ ] Test: Server startup with port collision
   - [ ] Test: Server startup with all ports unavailable
   - [ ] Test: Graceful shutdown on SIGTERM
@@ -86,7 +87,7 @@
 **Source Sequences**: seq-peer-creation.md, seq-add-peers.md, seq-remove-peers.md
 
 **Test Implementation:**
-- **tests/internal/peer/manager_test.go**
+- **internal/peer/manager_test.go** ❌ NOT YET CREATED
   - [ ] File header referencing test design
   - [ ] Test: Create peer with fresh key
   - [ ] Test: Create peer with provided key
@@ -125,9 +126,14 @@
 **Source Sequences**: seq-protocol-communication.md, seq-pubsub-communication.md, seq-add-peers.md, seq-remove-peers.md, seq-list-files.md, seq-get-file.md, seq-store-file.md
 
 **Test Implementation:**
-- **tests/internal/peer/peer_test.go**
+- **internal/peer/peer_test.go** ❌ NOT YET CREATED
   - [ ] File header referencing test design
   - [ ] Test: Send data to peer on protocol
+
+**Related Existing Tests:**
+- **internal/peer/virtual_connection_test.go** ✅ EXISTS
+- **internal/peer/connection_management_test.go** ✅ EXISTS
+- **internal/peer/connection_management_integration_test.go** ✅ EXISTS
   - [ ] Test: Receive protocol message
   - [ ] Test: Subscribe to topic
   - [ ] Test: Publish message to topic
@@ -172,9 +178,12 @@
 **Source Sequences**: seq-peer-creation.md, seq-list-files.md, seq-store-file.md
 
 **Test Implementation:**
-- **tests/internal/websocket/handler_test.go**
+- **internal/server/websocket_test.go** ❌ NOT YET CREATED
   - [ ] File header referencing test design
   - [ ] Test: Accept WebSocket connection
+
+**Related Existing Tests:**
+- **internal/protocol/messages_test.go** ✅ EXISTS
   - [ ] Test: Receive and parse JSON-RPC message
   - [ ] Test: Send JSON-RPC response
   - [ ] Test: Route Peer() request to PeerManager
@@ -214,7 +223,7 @@
 **Source CRC**: crc-BundleManager.md
 
 **Test Implementation:**
-- **tests/internal/bundle/manager_test.go**
+- **internal/bundle/bundle_test.go** ❌ NOT YET CREATED
   - [ ] File header referencing test design
   - [ ] Test: Detect bundled content in binary
   - [ ] Test: Detect absence of bundled content
@@ -252,7 +261,7 @@
 **Source Sequences**: seq-add-peers.md, seq-remove-peers.md, seq-list-files.md, seq-get-file.md, seq-store-file.md
 
 **Test Implementation:**
-- **tests/pkg/client/client.test.ts**
+- **pkg/client/src/client.test.ts** ❌ NOT YET CREATED
   - [ ] File header referencing test design
   - [ ] Test: Connect to server and initialize peer
   - [ ] Test: Connect with existing peer key
@@ -304,7 +313,7 @@
 **Source CRC**: crc-ConfigLoader.md
 
 **Test Implementation:**
-- **tests/internal/config/loader_test.go**
+- **internal/config/loader_test.go** ❌ NOT YET CREATED
   - [ ] File header referencing test design
   - [ ] Test: Load configuration from filesystem directory
   - [ ] Test: Load configuration from ZIP bundle
@@ -345,9 +354,12 @@
 **Source CRC**: crc-ProcessTracker.md
 
 **Test Implementation:**
-- **tests/internal/process/tracker_test.go**
+- **internal/pidfile/pidfile_test.go** ❌ NOT YET CREATED
   - [ ] File header referencing test design
   - [ ] Test: Register PID on startup
+
+**Related Existing Tests:**
+- **internal/commands/ps_integration_test.go** ✅ EXISTS
   - [ ] Test: Unregister PID on shutdown
   - [ ] Test: List all tracked PIDs
   - [ ] Test: Verify PID is actual p2p-webapp process
@@ -383,7 +395,7 @@
 **Source CRC**: crc-WebServer.md, crc-CommandRouter.md
 
 **Test Implementation:**
-- **tests/internal/web/server_test.go**
+- **internal/server/webserver_test.go** ❌ NOT YET CREATED
   - [ ] File header referencing test design
   - [ ] Test: Serve static file
   - [ ] Test: Serve JavaScript file with correct Content-Type
@@ -395,7 +407,7 @@
   - [ ] Test: Cache index.html for SPA routing
   - [ ] Test: Detect route vs static file
 
-- **tests/internal/commands/router_test.go**
+- **cmd/p2p-webapp/main_test.go** ❌ NOT YET CREATED
   - [ ] File header referencing test design
   - [ ] Test: Route to default server command
   - [ ] Test: Parse command-line flags
@@ -421,6 +433,38 @@
 
 ---
 
+### test-dht-bootstrap.md
+
+**Source Specs**: main.md
+**Source CRC**: crc-PeerManager.md, crc-Peer.md
+**Source Sequences**: seq-dht-bootstrap.md
+
+**Test Implementation:**
+- **internal/peer/dht_bootstrap_test.go** ❌ NOT YET CREATED
+  - [ ] File header referencing test design
+  - [ ] Test: DHT bootstrap success
+  - [ ] Test: DHT bootstrap timeout
+  - [ ] Test: Operation queuing before bootstrap
+  - [ ] Test: Operation immediate execution after bootstrap
+  - [ ] Test: Multiple queued operations
+  - [ ] Test: No DHT case
+  - [ ] Test: enqueueDHTOperation thread safety
+  - [ ] Test: processQueuedDHTOperations synchronization
+  - [ ] Test: Bootstrap peer connection
+  - [ ] Test: Bootstrap routing table polling
+
+**Coverage:**
+- ✅ bootstrapDHT
+- ✅ enqueueDHTOperation
+- ✅ processQueuedDHTOperations
+- ✅ DHT ready channel signaling
+
+**Gaps:**
+- Real DHT network integration
+- Bootstrap peer failure scenarios
+
+---
+
 ## Coverage Summary
 
 **CRC Responsibilities:**
@@ -434,12 +478,27 @@
 - Untested sequences: 0 (0%)
 
 **Test Designs:**
-- Total test design files: 9
+- Total test design files: 10
 - Total test cases: ~200
 
-**Test Implementation Files:**
-- Go tests: 8 files (tests/internal/**/*)
-- TypeScript tests: 1 file (tests/pkg/client/client.test.ts)
+**Test Implementation Files (Existing):**
+- internal/server/server_test.go ✅
+- internal/peer/virtual_connection_test.go ✅
+- internal/peer/connection_management_test.go ✅
+- internal/peer/connection_management_integration_test.go ✅
+- internal/protocol/messages_test.go ✅
+- internal/commands/ps_integration_test.go ✅
+
+**Test Implementation Files (Not Yet Created):**
+- internal/peer/manager_test.go
+- internal/peer/peer_test.go
+- internal/server/websocket_test.go
+- internal/bundle/bundle_test.go
+- internal/config/loader_test.go
+- internal/pidfile/pidfile_test.go
+- internal/server/webserver_test.go
+- cmd/p2p-webapp/main_test.go
+- pkg/client/src/client.test.ts
 
 **Gaps:**
 - VirtualConnectionManager stream lifecycle (complex integration test)
@@ -455,18 +514,23 @@
 ## Test Implementation Checklist
 
 ### Go Backend Tests
-- [ ] tests/internal/server/server_test.go
-- [ ] tests/internal/peer/manager_test.go
-- [ ] tests/internal/peer/peer_test.go
-- [ ] tests/internal/websocket/handler_test.go
-- [ ] tests/internal/bundle/manager_test.go
-- [ ] tests/internal/config/loader_test.go
-- [ ] tests/internal/process/tracker_test.go
-- [ ] tests/internal/web/server_test.go
-- [ ] tests/internal/commands/router_test.go
+- [x] internal/server/server_test.go ✅
+- [ ] internal/peer/manager_test.go
+- [ ] internal/peer/peer_test.go
+- [x] internal/peer/virtual_connection_test.go ✅
+- [x] internal/peer/connection_management_test.go ✅
+- [x] internal/peer/connection_management_integration_test.go ✅
+- [ ] internal/server/websocket_test.go
+- [x] internal/protocol/messages_test.go ✅
+- [ ] internal/bundle/bundle_test.go
+- [ ] internal/config/loader_test.go
+- [ ] internal/pidfile/pidfile_test.go
+- [x] internal/commands/ps_integration_test.go ✅
+- [ ] internal/server/webserver_test.go
+- [ ] cmd/p2p-webapp/main_test.go
 
 ### TypeScript Client Tests
-- [ ] tests/pkg/client/client.test.ts
+- [ ] pkg/client/src/client.test.ts
 
 ### Integration Tests (Future)
 - [ ] End-to-end server startup and WebSocket connection
@@ -477,4 +541,4 @@
 
 ---
 
-*Last updated: 2025-11-23*
+*Last updated: 2025-11-26*

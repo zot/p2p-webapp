@@ -100,6 +100,7 @@ type Manager struct {
 	verbosity             int
 	ipfsPeer              *ipfslite.Peer // IPFS peer for file storage
 	fileUpdateNotifyTopic string         // Optional topic for file update notifications
+	ipfsGetTimeout        time.Duration  // Timeout for IPFS Get operations
 }
 
 // Peer represents a single libp2p peer with its own host and state
@@ -163,7 +164,7 @@ func (n *discoveryNotifee) HandlePeerFound(pi peer.AddrInfo) {
 // NewManager creates a new peer manager
 // CRC: crc-PeerManager.md
 // Sequence: seq-server-startup.md
-func NewManager(ctx context.Context, bootstrapHost host.Host, ipfsPeer *ipfslite.Peer, verbosity int, fileUpdateNotifyTopic string) (*Manager, error) {
+func NewManager(ctx context.Context, bootstrapHost host.Host, ipfsPeer *ipfslite.Peer, verbosity int, fileUpdateNotifyTopic string, ipfsGetTimeout time.Duration) (*Manager, error) {
 	return &Manager{
 		ctx:                   ctx,
 		peers:                 make(map[string]*Peer),
@@ -171,6 +172,7 @@ func NewManager(ctx context.Context, bootstrapHost host.Host, ipfsPeer *ipfslite
 		verbosity:             verbosity,
 		ipfsPeer:              ipfsPeer,
 		fileUpdateNotifyTopic: fileUpdateNotifyTopic,
+		ipfsGetTimeout:        ipfsGetTimeout,
 	}, nil
 }
 
@@ -1817,8 +1819,10 @@ func (p *Peer) GetFile(cidStr, fallbackPeerID string) error {
 
 	// Spawn goroutine to retrieve content
 	go func() {
-		// Get node from IPFS
-		node, err := p.manager.ipfsPeer.Get(p.ctx, c)
+		// Get node from IPFS with configured timeout
+		getCtx, cancel := context.WithTimeout(p.ctx, p.manager.ipfsGetTimeout)
+		node, err := p.manager.ipfsPeer.Get(getCtx, c)
+		cancel()
 		if err != nil {
 			// File not found locally - try fallback peer if provided
 			if fallbackPeerID != "" {

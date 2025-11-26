@@ -12,7 +12,7 @@
 
 **Flow:**
 
-This sequence demonstrates file retrieval with an optional fallback mechanism. The client requests a file by CID, optionally specifying a fallback peer. If the file exists in the local IPFS node, it's retrieved immediately. If not found locally and a fallback peer is specified, the reserved "p2p-webapp" libp2p protocol is used to request the file from the fallback peer using `getFile(cid)` (type 2) and `fileContent(...)` (type 3) messages. The retrieved file is automatically added to the local IPFS node. The server sends `gotFile(cid, {success, content})` to the client to resolve or reject the promise.
+This sequence demonstrates file retrieval with an optional fallback mechanism. The client requests a file by CID, optionally specifying a fallback peer. If the file exists in the local IPFS node, it's retrieved within the configured timeout (default 3s, configurable via `ipfsGetTimeout`). If not found or timeout occurs and a fallback peer is specified, the reserved "p2p-webapp" libp2p protocol is used to request the file from the fallback peer using `getFile(cid)` (type 2) and `fileContent(...)` (type 3) messages. The retrieved file is automatically added to the local IPFS node. The server sends `gotFile(cid, {success, content})` to the client to resolve or reject the promise.
 
 ```
                               ┌────────┐                                           ┌────────────────┐             ┌───────────┐                                         ┌───────────┐           ┌─────────┐           ┌─────────────┐
@@ -79,7 +79,7 @@ This sequence demonstrates file retrieval with an optional fallback mechanism. T
           ║         ║              │    │ Resolve promise with FileContent                  │                           │                                                     │                      │                       │                                   ║   ║
           ║         ║              │<───┘                                                   │                           │                                                     │                      │                       │                                   ║   ║
           ║         ╠══════════════╪════════════════════════════════════════════════════════╪═══════════════════════════╪═════════════════════════════════════════════════════╪══════════════════════╪═══════════════════════╪═══════════════════════════════════╣   ║
-          ║         ║ [File NOT found in local IPFS and fallbackPeerID provided]            │                           │                                                     │                      │                       │                                   ║   ║
+          ║         ║ [File NOT found OR timeout in local IPFS, fallbackPeerID provided]     │                           │                                                     │                      │                       │                                   ║   ║
           ║         ║              │                                                        │                           │                                                     │<─────────────────────│                       │                                   ║   ║
           ║         ║              │                                                        │                           │                                                     │  error (not found)   │                       │                                   ║   ║
           ║         ║              │                                                        │                           │                                                     │                      │                       │                                   ║   ║
@@ -125,7 +125,7 @@ This sequence demonstrates file retrieval with an optional fallback mechanism. T
           ║         ║              │    │ Resolve promise with FileContent                  │                           │                                                     │                      │                       │                                   ║   ║
           ║         ║              │<───┘                                                   │                           │                                                     │                      │                       │                                   ║   ║
           ║         ╠══════════════╪════════════════════════════════════════════════════════╪═══════════════════════════╪═════════════════════════════════════════════════════╪══════════════════════╪═══════════════════════╪═══════════════════════════════════╣   ║
-          ║         ║ [File NOT found in local IPFS and NO fallbackPeerID provided]         │                           │                                                     │                      │                       │                                   ║   ║
+          ║         ║ [File NOT found OR timeout in local IPFS, NO fallbackPeerID provided]  │                           │                                                     │                      │                       │                                   ║   ║
           ║         ║              │                                                        │                           │                                                     │<─────────────────────│                       │                                   ║   ║
           ║         ║              │                                                        │                           │                                                     │  error (not found)   │                       │                                   ║   ║
           ║         ║              │                                                        │                           │                                                     │                      │                       │                                   ║   ║
@@ -153,7 +153,7 @@ This sequence demonstrates file retrieval with an optional fallback mechanism. T
 ## Notes
 
 - **Request Deduplication**: If multiple clients request the same CID simultaneously, only one IPFS request is made. All pending promises for that CID are resolved when the response arrives.
-- **Fallback Mechanism**: The fallback peer is only contacted if the file is not found in the local IPFS node. This ensures efficient use of network resources.
+- **Fallback Mechanism**: The fallback peer is contacted if the file is not found OR if the IPFS Get times out (configurable via `ipfsGetTimeout`, default 3s). This ensures efficient use of network resources while avoiding slow IPFS lookups.
 - **Automatic IPFS Caching**: When a file or directory is retrieved from a fallback peer:
   - The raw IPFS node data is transmitted in the response (`rawNode` field)
   - The node is added to the local IPFS blockstore using `blocks.NewBlockWithCid()` and `blockstore.Put()`

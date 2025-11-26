@@ -48,5 +48,8 @@ func DefaultConfig() *Config {
 			IndexFile:   "index.html",
 			SPAFallback: true,
 		},
+		P2P: P2PConfig{
+			IPFSGetTimeout: Duration{3 * time.Second},
+		},
 	}
 }
