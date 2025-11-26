@@ -3,6 +3,9 @@
 - Proxies opinionated IPFS and libp2p operations for managed peers
 - Provides a TypeScript library for easy communication with the Go application
 
+## 📦 Dependencies
+- **ipfs-lite**: Local clone at `~/work/ipfs-lite` - use this for source code inspection instead of fetching from web
+
 ## 🎯 Core Principles
 - Use **SOLID principles** in all implementations
 - Create comprehensive **unit tests** for all components

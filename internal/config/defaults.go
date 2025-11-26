@@ -50,6 +50,7 @@ func DefaultConfig() *Config {
 		},
 		P2P: P2PConfig{
 			IPFSGetTimeout: Duration{3 * time.Second},
+			StreamTimeout:  Duration{30 * time.Second},
 		},
 	}
 }

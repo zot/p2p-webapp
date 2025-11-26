@@ -101,6 +101,7 @@ type Manager struct {
 	ipfsPeer              *ipfslite.Peer // IPFS peer for file storage
 	fileUpdateNotifyTopic string         // Optional topic for file update notifications
 	ipfsGetTimeout        time.Duration  // Timeout for IPFS Get operations
+	streamTimeout         time.Duration  // Timeout for opening streams to peers
 }
 
 // Peer represents a single libp2p peer with its own host and state
@@ -164,7 +165,7 @@ func (n *discoveryNotifee) HandlePeerFound(pi peer.AddrInfo) {
 // NewManager creates a new peer manager
 // CRC: crc-PeerManager.md
 // Sequence: seq-server-startup.md
-func NewManager(ctx context.Context, bootstrapHost host.Host, ipfsPeer *ipfslite.Peer, verbosity int, fileUpdateNotifyTopic string, ipfsGetTimeout time.Duration) (*Manager, error) {
+func NewManager(ctx context.Context, bootstrapHost host.Host, ipfsPeer *ipfslite.Peer, verbosity int, fileUpdateNotifyTopic string, ipfsGetTimeout time.Duration, streamTimeout time.Duration) (*Manager, error) {
 	return &Manager{
 		ctx:                   ctx,
 		peers:                 make(map[string]*Peer),
@@ -173,6 +174,7 @@ func NewManager(ctx context.Context, bootstrapHost host.Host, ipfsPeer *ipfslite
 		ipfsPeer:              ipfsPeer,
 		fileUpdateNotifyTopic: fileUpdateNotifyTopic,
 		ipfsGetTimeout:        ipfsGetTimeout,
+		streamTimeout:         streamTimeout,
 	}, nil
 }
 
@@ -2122,9 +2124,11 @@ func (p *Peer) requestFileFromPeer(cidStr, fallbackPeerID string) error {
 		return fmt.Errorf("invalid peer ID: %w", err)
 	}
 
-	// Open stream to fallback peer
+	// Open stream to fallback peer with timeout
 	p.logVerbose(2, "Opening stream to fallback peer %s", fallbackPeerID)
-	stream, err := p.host.NewStream(p.ctx, targetPeer, protocol.ID(P2PWebAppProtocol))
+	streamCtx, streamCancel := context.WithTimeout(p.ctx, p.manager.streamTimeout)
+	stream, err := p.host.NewStream(streamCtx, targetPeer, protocol.ID(P2PWebAppProtocol))
+	streamCancel()
 	if err != nil {
 		p.logVerbose(1, "Failed to open stream to fallback peer %s: %v", fallbackPeerID, err)
 		return fmt.Errorf("failed to open stream: %w", err)
@@ -2735,8 +2739,10 @@ func (p *Peer) handleGetFile(stream network.Stream) {
 		return
 	}
 
-	// Get node from IPFS
-	node, err := p.manager.ipfsPeer.Get(p.ctx, c)
+	// Get node from IPFS with timeout
+	getCtx, cancel := context.WithTimeout(p.ctx, p.manager.ipfsGetTimeout)
+	node, err := p.manager.ipfsPeer.Get(getCtx, c)
+	cancel()
 	if err != nil {
 		p.logVerbose(1, "handleGetFile: failed to get CID %s: %v", msg.CID, err)
 		// Send error response

@@ -78,6 +78,7 @@ type P2PConfig struct {
 	ProtocolName            string   `toml:"protocolName"`
 	FileUpdateNotifyTopic   string   `toml:"fileUpdateNotifyTopic"`
 	IPFSGetTimeout          Duration `toml:"ipfsGetTimeout"`
+	StreamTimeout           Duration `toml:"streamTimeout"`
 }
 
 // Duration wraps time.Duration for TOML parsing

@@ -89,3 +89,13 @@ protocolName = "/p2p-webapp/1.0.0"  # Reserved libp2p protocol name for file lis
 fileUpdateNotifyTopic = "chatroom"
 
 # Message format: {"type":"p2p-webapp-file-update","peer":"<peerID>"}
+
+# Timeout for IPFS Get operations (default: 3s)
+# When fetching files, this is how long to wait for IPFS network retrieval
+# before falling back to direct peer transfer
+ipfsGetTimeout = "3s"
+
+# Timeout for opening streams to peers (default: 30s)
+# When requesting files from peers, this is how long to wait
+# for the connection to be established
+streamTimeout = "30s"

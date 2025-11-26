@@ -119,7 +119,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 
 		// Create peer manager
-		peerManager, err := peer.NewManager(ctx, ipfsNode.Host(), ipfsNode.Peer(), cfg.Behavior.Verbosity, cfg.P2P.FileUpdateNotifyTopic, cfg.P2P.IPFSGetTimeout.Duration)
+		peerManager, err := peer.NewManager(ctx, ipfsNode.Host(), ipfsNode.Peer(), cfg.Behavior.Verbosity, cfg.P2P.FileUpdateNotifyTopic, cfg.P2P.IPFSGetTimeout.Duration, cfg.P2P.StreamTimeout.Duration)
 		if err != nil {
 			return fmt.Errorf("failed to create peer manager: %w", err)
 		}
@@ -177,7 +177,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Peer ID: %s\n", ipfsNode.PeerID())
 
 		// Create peer manager
-		peerManager, err := peer.NewManager(ctx, ipfsNode.Host(), ipfsNode.Peer(), cfg.Behavior.Verbosity, cfg.P2P.FileUpdateNotifyTopic, cfg.P2P.IPFSGetTimeout.Duration)
+		peerManager, err := peer.NewManager(ctx, ipfsNode.Host(), ipfsNode.Peer(), cfg.Behavior.Verbosity, cfg.P2P.FileUpdateNotifyTopic, cfg.P2P.IPFSGetTimeout.Duration, cfg.P2P.StreamTimeout.Duration)
 		if err != nil {
 			return fmt.Errorf("failed to create peer manager: %w", err)
 		}

@@ -968,8 +968,8 @@
             const items = peerList.querySelectorAll('.peer-item:not(.room)');
             items.forEach(item => item.remove());
 
-            // Clear peer selector options (except first placeholder if any)
-            const options = peerSelector.querySelectorAll('option:not([value=""])');
+            // Clear peer selector options (except "My Files" option)
+            const options = peerSelector.querySelectorAll('option:not([value="me"])');
             options.forEach(opt => opt.remove());
 
             // Sort peers: connected first, then partial, then offline
@@ -1258,7 +1258,9 @@
                         downloadBtn.textContent = 'Download';
                         downloadBtn.onclick = (e) => {
                             e.stopPropagation();
-                            downloadFile(entry.cid, name);
+                            // Use fallback peer if viewing remote peer's files
+                            const fallbackPeer = (currentFilePeerID && currentFilePeerID !== client.peerID) ? currentFilePeerID : undefined;
+                            downloadFile(entry.cid, name, fallbackPeer);
                         };
                         actions.appendChild(downloadBtn);
                         headerDiv.appendChild(actions);
@@ -1317,9 +1319,9 @@
             }
         }
 
-        async function downloadFile(cid, filename) {
+        async function downloadFile(cid, filename, fallbackPeerID) {
             try {
-                const content = await client.getFile(cid);
+                const content = await client.getFile(cid, fallbackPeerID);
 
                 if (content.type === 'file') {
                     // Decode base64 content and trigger download
