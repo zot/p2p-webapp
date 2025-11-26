@@ -2246,6 +2246,18 @@ func (p *Peer) RemoveFile(filepath string) error {
 	// Current directory is now the parent directory where we need to remove the child
 	parentDir := currentDir
 
+	// Before removing, collect all CIDs from the item being removed
+	// so we can clean up orphaned blocks later
+	removedCIDs := make(map[cid.Cid]bool)
+	childNode, err := parentDir.Find(p.ctx, name)
+	if err == nil && childNode != nil {
+		// Collect the root CID and all child CIDs
+		if err := p.collectAllCIDs(p.ctx, childNode, removedCIDs); err != nil {
+			p.logVerbose(1, "Warning: failed to collect CIDs for removal: %v", err)
+		}
+		p.logVerbose(2, "Collected %d CIDs from item being removed", len(removedCIDs))
+	}
+
 	// Remove the child from parent directory
 	if err := parentDir.RemoveChild(p.ctx, name); err != nil {
 		return fmt.Errorf("failed to remove child: %w", err)
@@ -2298,11 +2310,142 @@ func (p *Peer) RemoveFile(filepath string) error {
 	p.logVerbose(2, "Removed file/directory: %s", filepath)
 
 	// ============================================================
-	// PHASE 4: Publish notification (no lock needed)
+	// PHASE 4: Clean up orphaned blocks (no lock needed)
+	// ============================================================
+	// Remove blocks that are no longer referenced anywhere in the file tree
+	// This handles the case where a file might exist in multiple locations
+	if len(removedCIDs) > 0 {
+		p.removeOrphanedBlocks(p.ctx, removedCIDs, newRootDir)
+	}
+
+	// ============================================================
+	// PHASE 5: Publish notification (no lock needed)
 	// ============================================================
 	p.publishFileUpdateNotification()
 
 	return nil
+}
+
+// collectAllCIDs recursively collects all CIDs from a node and its children
+// This is used to find all blocks that make up a file or directory
+func (p *Peer) collectAllCIDs(ctx context.Context, node ipld.Node, visited map[cid.Cid]bool) error {
+	c := node.Cid()
+	if visited[c] {
+		return nil
+	}
+	visited[c] = true
+
+	// Get all child links and recurse
+	for _, link := range node.Links() {
+		childNode, err := p.manager.ipfsPeer.Get(ctx, link.Cid)
+		if err != nil {
+			// Block might not exist locally, skip it
+			continue
+		}
+		if err := p.collectAllCIDs(ctx, childNode, visited); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// collectCIDsInDirectory recursively collects all CIDs in a HAMTDirectory and its contents
+// This builds a map of CID -> count of occurrences in the file tree
+func (p *Peer) collectCIDsInDirectory(ctx context.Context, dir *uio.HAMTDirectory, cidCounts map[cid.Cid]int) error {
+	// Get directory node's CID
+	dirNode, err := dir.GetNode()
+	if err != nil {
+		return err
+	}
+	cidCounts[dirNode.Cid()]++
+
+	// Get all links in this directory
+	links, err := dir.Links(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, link := range links {
+		// Count this link's CID
+		cidCounts[link.Cid]++
+
+		// Get the node
+		node, err := p.manager.ipfsPeer.Get(ctx, link.Cid)
+		if err != nil {
+			// Block might not exist locally, skip it
+			continue
+		}
+
+		// Count all child blocks of this node
+		visited := make(map[cid.Cid]bool)
+		visited[link.Cid] = true // Already counted above
+		for _, childLink := range node.Links() {
+			childNode, err := p.manager.ipfsPeer.Get(ctx, childLink.Cid)
+			if err != nil {
+				continue
+			}
+			if err := p.collectAllCIDsWithCounts(ctx, childNode, cidCounts); err != nil {
+				return err
+			}
+		}
+
+		// Check if this is a directory and recurse
+		fsNode, err := unixfs.ExtractFSNode(node)
+		if err == nil && fsNode.IsDir() {
+			subDir, err := uio.NewHAMTDirectoryFromNode(p.manager.ipfsPeer, node)
+			if err != nil {
+				continue
+			}
+			if err := p.collectCIDsInDirectory(ctx, subDir, cidCounts); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// collectAllCIDsWithCounts recursively collects all CIDs from a node and counts occurrences
+func (p *Peer) collectAllCIDsWithCounts(ctx context.Context, node ipld.Node, cidCounts map[cid.Cid]int) error {
+	c := node.Cid()
+	cidCounts[c]++
+
+	// Get all child links and recurse
+	for _, link := range node.Links() {
+		childNode, err := p.manager.ipfsPeer.Get(ctx, link.Cid)
+		if err != nil {
+			// Block might not exist locally, skip it
+			continue
+		}
+		if err := p.collectAllCIDsWithCounts(ctx, childNode, cidCounts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeOrphanedBlocks removes blocks that are no longer referenced in the file tree
+func (p *Peer) removeOrphanedBlocks(ctx context.Context, removedCIDs map[cid.Cid]bool, newDir *uio.HAMTDirectory) {
+	// Collect all CIDs currently in the updated directory tree
+	currentCIDs := make(map[cid.Cid]int)
+	if err := p.collectCIDsInDirectory(ctx, newDir, currentCIDs); err != nil {
+		p.logVerbose(1, "Warning: failed to collect CIDs in updated directory: %v", err)
+		return
+	}
+
+	// Remove blocks that were in the removed file but are not in the current tree
+	var cidsToRemove []cid.Cid
+	for c := range removedCIDs {
+		if _, exists := currentCIDs[c]; !exists {
+			cidsToRemove = append(cidsToRemove, c)
+		}
+	}
+
+	if len(cidsToRemove) > 0 {
+		p.logVerbose(2, "Removing %d orphaned blocks from storage", len(cidsToRemove))
+		if err := p.manager.ipfsPeer.RemoveMany(ctx, cidsToRemove); err != nil {
+			p.logVerbose(1, "Warning: failed to remove orphaned blocks: %v", err)
+		}
+	}
 }
 
 // Internal methods

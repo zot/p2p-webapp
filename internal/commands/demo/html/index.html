@@ -497,6 +497,14 @@
             background: #2980b9;
         }
 
+        .file-tree-item-header .delete-btn {
+            background: #e74c3c;
+        }
+
+        .file-tree-item-header .delete-btn:hover {
+            background: #c0392b;
+        }
+
         .file-tree-children {
             margin-left: 1.5rem;
         }
@@ -1248,11 +1256,12 @@
                     cidSpan.textContent = '...' + entry.cid.slice(-12);
                     headerDiv.appendChild(cidSpan);
 
+                    // Add action buttons
+                    const actions = document.createElement('div');
+                    actions.className = 'actions';
+
                     // Add download button for files
                     if (entry.type === 'file') {
-                        const actions = document.createElement('div');
-                        actions.className = 'actions';
-
                         const downloadBtn = document.createElement('button');
                         downloadBtn.className = 'action-btn';
                         downloadBtn.textContent = 'Download';
@@ -1263,6 +1272,31 @@
                             downloadFile(entry.cid, name, fallbackPeer);
                         };
                         actions.appendChild(downloadBtn);
+                    }
+
+                    // Add delete button for own files/directories only
+                    const isOwnFiles = !currentFilePeerID || currentFilePeerID === client.peerID;
+                    if (isOwnFiles) {
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.className = 'action-btn delete-btn';
+                        deleteBtn.textContent = 'Delete';
+                        deleteBtn.onclick = async (e) => {
+                            e.stopPropagation();
+                            const itemType = entry.type === 'directory' ? 'folder' : 'file';
+                            if (confirm(`Delete ${itemType} "${name}"?`)) {
+                                try {
+                                    await client.removeFile(itemPath);
+                                    // Refresh file list
+                                    loadPeerFiles(currentFilePeerID || client.peerID);
+                                } catch (err) {
+                                    alert(`Failed to delete: ${err.message}`);
+                                }
+                            }
+                        };
+                        actions.appendChild(deleteBtn);
+                    }
+
+                    if (actions.children.length > 0) {
                         headerDiv.appendChild(actions);
                     }
                 }

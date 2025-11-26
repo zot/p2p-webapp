@@ -208,15 +208,18 @@ See `docs/examples/p2p-webapp.toml` for a fully documented example configuration
               - Directory created in currently selected folder (prefixed with folder path)
               - Newly created directory is automatically selected
             - Download files: click to retrieve by CID
+            - Delete files/directories: click delete button with confirmation
+              - Only deletes IPFS blocks if no other references exist in file tree
           - **Peer files** (read-only):
             - Download only: retrieve files by CID
-            - Upload and create directory buttons disabled
+            - Upload, create directory, and delete buttons disabled
         - **Implementation details**:
           - Uses `listFiles(peerid): Promise<{rootCID, entries}>` to fetch directory tree
           - Converts flat pathname entries to hierarchical tree structure
           - Stores expanded/collapsed state per directory
           - Uses `storeFile(path, content)` for file uploads and `createDirectory(path)` for directory creation
           - Uses `getFile(cid): Promise<FileContent>` for downloads
+          - Uses `removeFile(path)` for deletions
           - Modal overlay with close button to return to chat
     - contact list feature
       - **Contacts button**: Located in the top-right header next to Browse Files
