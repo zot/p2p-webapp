@@ -505,6 +505,17 @@
             background: #c0392b;
         }
 
+        .file-tree-item-header .action-btn.downloading {
+            background: #95a5a6;
+            cursor: wait;
+        }
+
+        .file-tree-item-header .action-btn.downloading::before {
+            content: "⟳ ";
+            display: inline-block;
+            animation: spin 1s linear infinite;
+        }
+
         .file-tree-children {
             margin-left: 1.5rem;
         }
@@ -785,6 +796,7 @@
         let dmMessages = new Map(); // peerID -> [{text, isOwn, timestamp}]
         let roomMessages = []; // Store room messages: [{senderPeerID, text, isOwn, timestamp}]
         let unreadCounts = new Map(); // peerID -> number of unread messages
+        let roomUnreadCount = 0; // Unread messages in room chat
         let pingCheckInterval = null; // Interval for periodic ping checks
 
         // File browser state
@@ -909,6 +921,7 @@
 
             messagesDiv.innerHTML = '';
             if (mode === 'room') {
+                clearRoomUnreadCount();
                 addMessage('', 'Switched to room chat', false, true);
                 displayStoredRoomMessages();
             } else {
@@ -947,6 +960,37 @@
         function clearUnreadCount(peerID) {
             unreadCounts.set(peerID, 0);
             updateUnreadBadge(peerID);
+        }
+
+        function updateRoomUnreadBadge() {
+            const roomItem = document.querySelector('.peer-item.room');
+            if (!roomItem) return;
+
+            let badge = roomItem.querySelector('.unread-badge');
+
+            if (roomUnreadCount > 0) {
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'unread-badge';
+                    const nameDiv = roomItem.querySelector('.peer-name');
+                    nameDiv.appendChild(badge);
+                }
+                badge.textContent = roomUnreadCount;
+            } else {
+                if (badge) {
+                    badge.remove();
+                }
+            }
+        }
+
+        function incrementRoomUnreadCount() {
+            roomUnreadCount++;
+            updateRoomUnreadBadge();
+        }
+
+        function clearRoomUnreadCount() {
+            roomUnreadCount = 0;
+            updateRoomUnreadBadge();
         }
 
         // Note: Ping-based connection check removed - waitForAck only confirms local
@@ -1269,7 +1313,7 @@
                             e.stopPropagation();
                             // Use fallback peer if viewing remote peer's files
                             const fallbackPeer = (currentFilePeerID && currentFilePeerID !== client.peerID) ? currentFilePeerID : undefined;
-                            downloadFile(entry.cid, name, fallbackPeer);
+                            downloadFile(entry.cid, name, fallbackPeer, downloadBtn);
                         };
                         actions.appendChild(downloadBtn);
                     }
@@ -1353,7 +1397,14 @@
             }
         }
 
-        async function downloadFile(cid, filename, fallbackPeerID) {
+        async function downloadFile(cid, filename, fallbackPeerID, downloadBtn) {
+            // Show spinner on the download button
+            if (downloadBtn) {
+                downloadBtn.classList.add('downloading');
+                downloadBtn.textContent = 'Downloading...';
+                downloadBtn.disabled = true;
+            }
+
             try {
                 const content = await client.getFile(cid, fallbackPeerID);
 
@@ -1378,6 +1429,13 @@
             } catch (error) {
                 console.error('Failed to download file:', error);
                 alert('Failed to download file');
+            } finally {
+                // Hide spinner and restore button
+                if (downloadBtn) {
+                    downloadBtn.classList.remove('downloading');
+                    downloadBtn.textContent = 'Download';
+                    downloadBtn.disabled = false;
+                }
             }
         }
 
@@ -1661,7 +1719,10 @@
         (async () => {
             try {
                 // Connect and initialize the client
-                client = await connect();
+                client = await connect({
+                    onClose: () => setStatus('Disconnected', 'error')
+                });
+                console.log(`p2p-webapp version: ${client.version}`);
 
                 peerIDDiv.textContent = `Your Peer ID: ${client.peerID}`;
                 setStatus('Connecting to network...', 'connecting');
@@ -1702,6 +1763,9 @@
                             // Only display if currently in room mode
                             if (currentMode === 'room') {
                                 addMessage(senderPeerID, data.text, false);
+                            } else {
+                                // Increment unread count when not viewing room
+                                incrementRoomUnreadCount();
                             }
                         }
                     },

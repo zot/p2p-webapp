@@ -146,6 +146,23 @@ The bundled demo is a peer-to-peer chatroom with file sharing. It demonstrates a
 
 **Tip**: The demo stores all messages (both room and DM) so you can switch between conversations without losing messages.
 
+#### Unread Message Indicators
+
+**Purpose**: See at a glance which conversations have new messages
+
+**How it works**:
+- Red badge appears next to peer names or "Chat room" when unread messages exist
+- Badge shows the count of unread messages
+- Badge disappears when you select that conversation
+
+**Example**:
+```
+Peers:
+• Chat room (2)     ← 2 unread room messages
+• Alice (5)         ← 5 unread DMs from Alice
+• Bob               ← No unread messages
+```
+
 ### File Sharing Features
 
 <!-- Spec: main.md (FR4: IPFS File Storage, FR5: File Listing, FR6: File Retrieval) -->
@@ -209,9 +226,10 @@ The bundled demo is a peer-to-peer chatroom with file sharing. It demonstrates a
 
 **How to download**:
 1. Browse files (yours or peer's)
-2. Click on a file name
-3. File retrieved from IPFS by CID
-4. Browser downloads the file
+2. Click the "Download" button next to the file
+3. A spinning indicator appears while the file is being retrieved
+4. File retrieved from IPFS by CID
+5. Browser downloads the file
 
 **Behind the scenes**:
 - File retrieved using content-addressed storage (IPFS)

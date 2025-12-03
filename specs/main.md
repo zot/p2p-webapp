@@ -3,10 +3,14 @@
   - located at `pkg/client/src/`
   - compiled to ES modules and bundled with the demo
   - promise-based API for all operations
-  - `connect(peerKey?)` connects to server and initializes peer in one call
+  - `connect(options?)` connects to server and initializes peer in one call
+    - options.peerKey: optional peer key to restore previous identity
+    - options.onClose: optional callback when WebSocket connection closes
     - merges WebSocket connection and peer initialization for simplicity
-    - returns `[peerID, peerKey]` tuple
+    - returns the client instance (for method chaining)
     - internally performs WebSocket connect followed by peer protocol message
+  - `connected` getter returns true if fully connected (after peer response succeeds)
+  - `version` getter returns the server version received during connection
   - uses protocol-based addressing with (peer, protocol) tuples instead of connection IDs
   - `start(protocol, onData)` registers listener that receives (peer, data) for all messages on that protocol
   - `send(peer, protocol, data): Promise<void>` sends data directly using peer+protocol addressing
@@ -165,6 +169,7 @@ See `docs/examples/p2p-webapp.toml` for a fully documented example configuration
     - displays a list of peers on the right side
       - first entry: "Chat room" (room chat mode)
       - remaining entries: individual users
+      - entries show unread message count badges when messages arrive while viewing elsewhere
     - two communication modes indicated at the top of the view
       - room chat (default)
         - uses pubsub for group messaging
@@ -208,10 +213,12 @@ See `docs/examples/p2p-webapp.toml` for a fully documented example configuration
               - Directory created in currently selected folder (prefixed with folder path)
               - Newly created directory is automatically selected
             - Download files: click to retrieve by CID
+              - Shows spinning indicator during download
             - Delete files/directories: click delete button with confirmation
               - Only deletes IPFS blocks if no other references exist in file tree
           - **Peer files** (read-only):
             - Download only: retrieve files by CID
+              - Shows spinning indicator during download
             - Upload, create directory, and delete buttons disabled
         - **Implementation details**:
           - Uses `listFiles(peerid): Promise<{rootCID, entries}>` to fetch directory tree
@@ -386,7 +393,7 @@ Peers and their WebSocket connections are ephemeral. The client provides peerKey
 - rootDirectory is an optional string representation of the peer directory's CID
   - if present, initialize the peer's directory
   - if absent, the peer's directory remains nil
-### Response: [peerid, peerkey] or error
+### Response: {peerid, peerkey, version} or error
 
 ## start(protocol)
 - Start a protocol and register to receive messages
@@ -749,3 +756,22 @@ await client.subscribe(ROOM_TOPIC, onMessage, onPeerChange);
 // Now fully connected to pubsub group
 setStatus('Connected', 'connected');  // Stop spinning, show connected
 ```
+
+## Development Testing
+
+### Running the Server for Testing
+- Use `--noopen` flag to prevent auto-opening browser
+- Use `--linger` flag to keep server running after WebSocket connections close
+- Verbosity flags: `-v` (basic), `-vv` (WebSocket details), `-vvv` (debug)
+- Example: `./p2p-webapp --noopen --linger -vv`
+
+### Automated Testing with Playwright
+When using Claude Code or other AI assistants with the Bash tool:
+- Use the `run_in_background` parameter to start the server instead of shell `&`
+- Shell backgrounding (`&`) with verbose flags causes long waits as the tool waits for output to complete
+- The `run_in_background` parameter properly detaches the process
+
+### Process Management
+- Check for running instances: `pgrep -a p2p-webapp`
+- Kill all instances: `./p2p-webapp killall`
+- **Warning**: Do not use `ps aux | grep p2p-webapp` - this pattern matches both the binary AND any process whose command line contains the path (e.g., Claude's working directory)

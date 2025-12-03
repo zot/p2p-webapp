@@ -22,10 +22,11 @@ type StringResponse struct {
 	Value string `json:"value"`
 }
 
-// PeerResponse is used for the Peer command, returning [peerid, peerkey]
+// PeerResponse is used for the Peer command, returning {peerid, peerkey, version}
 type PeerResponse struct {
 	PeerID  string `json:"peerid"`
 	PeerKey string `json:"peerkey"`
+	Version string `json:"version"`
 }
 
 // ErrorResponse provides standardized error structure

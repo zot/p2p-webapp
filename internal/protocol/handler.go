@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/zot/p2p-webapp/internal/commands"
 	"github.com/zot/p2p-webapp/internal/peer"
 )
 
@@ -490,7 +491,7 @@ func (h *Handler) stringResponse(requestID int, value string) (*Message, error) 
 }
 
 func (h *Handler) peerResponse(requestID int, peerID, peerKey string) (*Message, error) {
-	resp := PeerResponse{PeerID: peerID, PeerKey: peerKey}
+	resp := PeerResponse{PeerID: peerID, PeerKey: peerKey, Version: commands.Version}
 	result, _ := json.Marshal(resp)
 	return &Message{
 		RequestID:  requestID,

@@ -16,6 +16,11 @@ export interface StringResponse {
 export interface PeerResponse {
     peerid: string;
     peerkey: string;
+    version: string;
+}
+export interface ConnectOptions {
+    peerKey?: string;
+    onClose?: () => void;
 }
 export interface PeerRequest {
     peerkey?: string;

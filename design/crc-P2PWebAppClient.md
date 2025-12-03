@@ -6,8 +6,11 @@
 
 ### Knows
 - websocket: WebSocket connection to server
-- peerID: This client's peer ID (returned from connect(), null until connected)
-- peerKey: This client's peer key (returned from connect(), null until connected)
+- connected: Boolean indicating if fully connected (after peer response succeeds)
+- peerID: This client's peer ID (null until connected)
+- peerKey: This client's peer key (null until connected)
+- version: Server version received during connection (null until connected)
+- onCloseCallback: Optional callback invoked when connection closes
 - requestID: Current request ID counter
 - pendingRequests: Map of requestID to Promise resolvers
 - protocolListeners: Map of protocol to callback functions
@@ -18,7 +21,8 @@
 - fileListHandlers: Map of peerID to pending listFiles request handlers
 
 ### Does
-- connect: Connect to server and initialize peer (WebSocket + Peer command)
+- connect(options?): Connect to server and initialize peer, accepts {peerKey?, onClose?}, returns this
+- connected: Getter returning true if fully connected
 - start: Register protocol listener to receive (peer, data) messages
 - stop: Remove protocol listener
 - send: Send data to peer on protocol with optional delivery confirmation callback

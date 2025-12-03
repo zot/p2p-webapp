@@ -7,6 +7,7 @@ import {
   FileEntry,
   FileContent,
   StoreFileResponse,
+  ConnectOptions,
   ProtocolDataCallback,
   TopicDataCallback,
   PeerChangeCallback,
@@ -32,8 +33,11 @@ interface PendingPromiseRequest<T> {
 // CRC: crc-P2PWebAppClient.md
 export class P2PWebAppClient {
   private ws: WebSocket | null = null;
+  private _connected: boolean = false;
   private _peerID: string | null = null;
   private _peerKey: string | null = null;
+  private _version: string | null = null;
+  private onCloseCallback: (() => void) | null = null;
   private requestID: number = 0;
   private pending: Map<number, PendingRequest> = new Map();
   private protocolListeners: Map<string, ProtocolDataCallback> = new Map(); // key: protocol
@@ -54,11 +58,12 @@ export class P2PWebAppClient {
 
   /**
    * Connect to the WebSocket server and initialize peer identity
-   * @param peerKey Optional peer key to restore previous identity
-   * @returns Promise resolving to [peerID, peerKey] tuple
+   * @param options Optional connection options (peerKey, onClose callback)
+   * @returns Promise resolving to this client instance
    * CRC: crc-P2PWebAppClient.md
    */
-  async connect(peerKey?: string): Promise<[string, string]> {
+  async connect(options?: ConnectOptions): Promise<this> {
+    this.onCloseCallback = options?.onClose ?? null;
     const wsUrl = this.getDefaultWSUrl();
 
     // First, establish WebSocket connection
@@ -72,11 +77,13 @@ export class P2PWebAppClient {
     });
 
     // Then, initialize peer identity
-    const result = await this.sendRequest('peer', peerKey ? { peerkey: peerKey } : {});
+    const result = await this.sendRequest('peer', options?.peerKey ? { peerkey: options.peerKey } : {});
     const response = result as PeerResponse;
     this._peerID = response.peerid;
     this._peerKey = response.peerkey;
-    return [this._peerID, this._peerKey];
+    this._version = response.version;
+    this._connected = true;
+    return this;
   }
 
   /**
@@ -317,6 +324,20 @@ export class P2PWebAppClient {
     return this._peerKey;
   }
 
+  /**
+   * Get the server version received during connection
+   */
+  get version(): string | null {
+    return this._version;
+  }
+
+  /**
+   * Check if the client is fully connected (after peer response succeeds)
+   */
+  get connected(): boolean {
+    return this._connected;
+  }
+
   // Private methods
 
   private getDefaultWSUrl(): string {
@@ -458,6 +479,10 @@ export class P2PWebAppClient {
   }
 
   private handleClose(): void {
+    // Update connection state
+    this._connected = false;
+    this.ws = null;
+
     // Clean up all listeners on disconnect
     this.protocolListeners.clear();
     this.topicListeners.clear();
@@ -475,6 +500,11 @@ export class P2PWebAppClient {
 
     this.messageQueue.length = 0;
     this.processingMessage = false;
+
+    // Call the onClose callback if set
+    if (this.onCloseCallback) {
+      this.onCloseCallback();
+    }
   }
 
   private sendRequest(method: string, params: any): Promise<any> {
@@ -500,11 +530,14 @@ export class P2PWebAppClient {
 
 /**
  * Convenience function to create and connect a P2PWebAppClient in one call
- * @param peerKey Optional peer key to restore previous identity
+ * @param options Optional connection options (peerKey, onClose callback)
  * @returns Promise resolving to connected P2PWebAppClient instance
  */
-export async function connect(peerKey?: string): Promise<P2PWebAppClient> {
+export async function connect(options?: ConnectOptions): Promise<P2PWebAppClient> {
   const client = new P2PWebAppClient();
-  await client.connect(peerKey);
+  await client.connect(options);
   return client;
 }
+
+// Re-export types for external use
+export { ConnectOptions } from './types.js';

@@ -1,8 +1,11 @@
-import { FileEntry, FileContent, StoreFileResponse, ProtocolDataCallback, TopicDataCallback, PeerChangeCallback } from './types.js';
+import { FileEntry, FileContent, StoreFileResponse, ConnectOptions, ProtocolDataCallback, TopicDataCallback, PeerChangeCallback } from './types.js';
 export declare class P2PWebAppClient {
     private ws;
+    private _connected;
     private _peerID;
     private _peerKey;
+    private _version;
+    private onCloseCallback;
     private requestID;
     private pending;
     private protocolListeners;
@@ -16,11 +19,11 @@ export declare class P2PWebAppClient {
     private getFilePending;
     /**
      * Connect to the WebSocket server and initialize peer identity
-     * @param peerKey Optional peer key to restore previous identity
-     * @returns Promise resolving to [peerID, peerKey] tuple
+     * @param options Optional connection options (peerKey, onClose callback)
+     * @returns Promise resolving to this client instance
      * CRC: crc-P2PWebAppClient.md
      */
-    connect(peerKey?: string): Promise<[string, string]>;
+    connect(options?: ConnectOptions): Promise<this>;
     /**
      * Close the WebSocket connection
      */
@@ -112,6 +115,14 @@ export declare class P2PWebAppClient {
      * Get the current peer key
      */
     get peerKey(): string | null;
+    /**
+     * Get the server version received during connection
+     */
+    get version(): string | null;
+    /**
+     * Check if the client is fully connected (after peer response succeeds)
+     */
+    get connected(): boolean;
     private getDefaultWSUrl;
     private handleMessage;
     private processMessageQueue;
@@ -121,7 +132,8 @@ export declare class P2PWebAppClient {
 }
 /**
  * Convenience function to create and connect a P2PWebAppClient in one call
- * @param peerKey Optional peer key to restore previous identity
+ * @param options Optional connection options (peerKey, onClose callback)
  * @returns Promise resolving to connected P2PWebAppClient instance
  */
-export declare function connect(peerKey?: string): Promise<P2PWebAppClient>;
+export declare function connect(options?: ConnectOptions): Promise<P2PWebAppClient>;
+export { ConnectOptions } from './types.js';

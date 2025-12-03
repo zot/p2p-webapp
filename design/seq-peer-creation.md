@@ -70,7 +70,7 @@
           ║             │                       │   [peerID, peerKey]     │                         ║   │
           ║             │                       │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │                         ║   │
           ║             │                       │                         │                         ║   │
-          ║             │   success response    │                         │                         ║   │
+          ║             │ {peerid,peerkey,ver}  │                         │                         ║   │
           ║             │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │                         │                         ║   │
           ╚═════════════╪═══════════════════════╪═════════════════════════╪═════════════════════════╝   │
                     ┌───┴───┐          ┌────────┴───────┐           ┌─────┴─────┐                    ┌──┴─┐
@@ -85,3 +85,4 @@
 - Duplicate peerID check prevents multiple tabs using same peer identity
 - PeerManager generates human-readable aliases (peer-a, peer-b, etc.) for logging
 - Peer discovery (mDNS + DHT) is enabled automatically during initialization
+- Response includes server version for client to store and expose via version getter

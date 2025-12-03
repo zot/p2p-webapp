@@ -174,18 +174,17 @@ make clean
 Use the release agent to make new releases
 
 ## 🧪 Testing with Playwright
+
+See `specs/main.md` "Development Testing" section for full details.
+
 When testing with Playwright MCP:
 
 1. **Start the server for testing:**
    ```bash
-   # Run with bundled demo (recommended for testing)
    ./p2p-webapp --noopen --linger -vv
-
-   # Flags explained:
-   # --noopen: Don't auto-open browser
-   # --linger: Keep server running after WebSocket connections close
-   # -v, -vv, -vvv: Verbosity levels (1, 2, or 3)
    ```
+
+   **IMPORTANT**: Use `run_in_background: true` parameter instead of shell `&`. Using `&` with verbose flags causes long waits.
 
 2. **ALWAYS check for running instances BEFORE starting tests**
    ```bash
