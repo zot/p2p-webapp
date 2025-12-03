@@ -32,42 +32,57 @@ This copies:
 ### Import
 
 ```typescript
-import { connect, start, stop, send, subscribe, publish, unsubscribe, listPeers, addPeers, removePeers, listFiles, getFile, storeFile, createDirectory, removeFile } from './client.js';
+import { connect } from './client.js';
 ```
 
-Or with named export:
+Or import the class directly:
+
+```typescript
+import { P2PWebAppClient } from './client.js';
+```
+
+Or with namespace import:
 
 ```typescript
 import * as P2P from './client.js';
 ```
 
+**Note**: All API methods (`start`, `stop`, `send`, `subscribe`, etc.) are instance methods on the `P2PWebAppClient` class. Use the `connect()` convenience function to get a connected client instance, then call methods on it.
+
 ---
 
 ### Core API
 
-#### `connect(peerKey?: string, rootDirectory?: string): Promise<[string, string]>`
+#### `connect(options?: ConnectOptions): Promise<P2PWebAppClient>`
 
 Connect to p2p-webapp server and initialize peer.
 
 **Parameters**:
-- `peerKey` (optional) - Existing peer key to reuse identity. If omitted, generates new key.
-- `rootDirectory` (optional) - CID of peer's root directory to restore file state. If omitted, starts with empty directory.
+- `options` (optional) - Connection options object:
+  - `peerKey` (string, optional) - Existing peer key to reuse identity. If omitted, generates new key.
+  - `onClose` (function, optional) - Callback invoked when the WebSocket connection closes.
 
-**Returns**: Promise resolving to `[peerID, peerKey]`
-- `peerID` - Unique identifier for this peer
-- `peerKey` - Private key (save this to maintain identity across sessions)
+**Returns**: Promise resolving to the connected `P2PWebAppClient` instance
 
 **Throws**: Error if connection fails or peer already initialized
 
 **Example**:
 ```typescript
 // New peer
-const [peerID, peerKey] = await connect();
-localStorage.setItem('peerKey', peerKey);
+const client = await connect();
+localStorage.setItem('peerKey', client.peerKey);
+console.log('Connected as:', client.peerID);
+console.log('Server version:', client.version);
 
-// Reuse identity
+// Reuse identity with disconnect handler
 const savedKey = localStorage.getItem('peerKey');
-const [peerID, peerKey] = await connect(savedKey);
+const client = await connect({
+  peerKey: savedKey,
+  onClose: () => {
+    console.log('Disconnected from server');
+    showReconnectButton();
+  }
+});
 ```
 
 **Notes**:
@@ -75,6 +90,100 @@ const [peerID, peerKey] = await connect(savedKey);
 - Establishes WebSocket connection and sends Peer() command
 - Only call once per page load
 - Duplicate peerID error means same peer key used in another tab
+- Access `client.peerID`, `client.peerKey`, `client.version`, and `client.connected` after connecting
+
+---
+
+#### `peerID` (getter)
+
+Get the current peer ID.
+
+**Returns**: `string | null` - The peer ID, or `null` if not connected
+
+**Example**:
+```typescript
+const client = await connect();
+console.log('My peer ID:', client.peerID);
+```
+
+---
+
+#### `peerKey` (getter)
+
+Get the current peer key (private key for identity persistence).
+
+**Returns**: `string | null` - The peer key, or `null` if not connected
+
+**Example**:
+```typescript
+const client = await connect();
+// Save for future sessions
+localStorage.setItem('peerKey', client.peerKey);
+```
+
+---
+
+#### `version` (getter)
+
+Get the server version received during connection.
+
+**Returns**: `string | null` - The server version string, or `null` if not connected
+
+**Example**:
+```typescript
+const client = await connect();
+console.log('Server version:', client.version);
+// Output: "1.0.0-rc10"
+```
+
+**Notes**:
+- Version is received as part of the Peer command response
+- Useful for checking server compatibility or displaying version info
+
+---
+
+#### `connected` (getter)
+
+Check if the client is fully connected (after peer response succeeds).
+
+**Returns**: `boolean` - `true` if connected and peer initialized, `false` otherwise
+
+**Example**:
+```typescript
+const client = await connect();
+console.log('Connected:', client.connected); // true
+
+// Later, after disconnect
+client.close();
+console.log('Connected:', client.connected); // false
+```
+
+**Notes**:
+- Returns `true` only after the Peer command succeeds
+- Automatically set to `false` when the WebSocket connection closes
+
+---
+
+#### `close(): void`
+
+Close the WebSocket connection.
+
+**Returns**: Nothing
+
+**Example**:
+```typescript
+const client = await connect();
+// ... use client ...
+
+// Disconnect cleanly
+client.close();
+```
+
+**Notes**:
+- Closes the WebSocket connection
+- All pending promises are rejected with "Connection closed" error
+- The `onClose` callback (if provided in `connect()` options) is called
+- The `connected` getter will return `false` after close
 
 ---
 
@@ -571,6 +680,11 @@ See [`subscribe()` File Update Notifications](#file-update-notifications) for ha
 ### Type Definitions
 
 ```typescript
+interface ConnectOptions {
+  peerKey?: string;        // Existing peer key to reuse identity
+  onClose?: () => void;    // Callback when connection closes
+}
+
 type ProtocolDataCallback = (peer: string, data: any) => void | Promise<void>;
 type TopicDataCallback = (peer: string, data: any) => void | Promise<void>;
 type PeerChangeCallback = (peer: string, joined: boolean) => void | Promise<void>;
@@ -672,28 +786,43 @@ Or error:
 
 **Command**: `"peer"`
 
-**Args**: `[peerKey?]`
-- `peerKey` (string, optional) - Existing peer key or omit for new key
+**Params**: `{ peerkey?: string }`
+- `peerkey` (string, optional) - Existing peer key or omit for new key
 
-**Response**: `[peerID, peerKey]`
-- `peerID` (string) - Unique peer identifier
-- `peerKey` (string) - Private key for this peer
+**Response**: `{ peerid: string, peerkey: string, version: string }`
+- `peerid` (string) - Unique peer identifier
+- `peerkey` (string) - Private key for this peer
+- `version` (string) - Server version string
 
 **Error**: `"duplicate peer"` if peerID already registered
 
 **Example**:
 ```json
-// Request
+// Request (new peer)
 {
-  "requestID": 0,
-  "command": "peer",
-  "args": []
+  "requestid": 0,
+  "method": "peer",
+  "params": {},
+  "isresponse": false
+}
+
+// Request (reuse identity)
+{
+  "requestid": 0,
+  "method": "peer",
+  "params": { "peerkey": "CAA..." },
+  "isresponse": false
 }
 
 // Response
 {
-  "requestID": 0,
-  "result": ["12D3KooW...", "CAA..."]
+  "requestid": 0,
+  "result": {
+    "peerid": "12D3KooW...",
+    "peerkey": "CAA...",
+    "version": "1.0.0-rc10"
+  },
+  "isresponse": true
 }
 ```
 
@@ -1323,25 +1452,25 @@ try {
 ### Example 1: Simple Chat Application
 
 ```typescript
-import { connect, start, send } from './client.js';
+import { connect } from './client.js';
 
-let myPeerID;
+let client;
 let otherPeer;
 
 // Initialize
 async function init() {
-  [myPeerID, _] = await connect();
+  client = await connect();
 
-  await start('chat', (peer, data) => {
+  await client.start('chat', (peer, data) => {
     displayMessage(peer, data.text);
   });
 
-  console.log('Ready!', myPeerID);
+  console.log('Ready!', client.peerID);
 }
 
 // Send message
 async function sendMessage(text) {
-  await send(otherPeer, 'chat', { text });
+  await client.send(otherPeer, 'chat', { text });
 }
 
 init();
@@ -1352,15 +1481,15 @@ init();
 ### Example 2: Chat Room with Peer List
 
 ```typescript
-import { connect, subscribe, publish, listPeers } from './client.js';
+import { connect } from './client.js';
 
-let myPeerID;
+let client;
 let roomPeers = [];
 
 async function joinRoom() {
-  [myPeerID, _] = await connect();
+  client = await connect();
 
-  await subscribe('chatroom',
+  await client.subscribe('chatroom',
     // Message callback
     (peer, data) => {
       displayMessage(peer, data.text);
@@ -1377,12 +1506,12 @@ async function joinRoom() {
   );
 
   // Get initial peer list
-  roomPeers = await listPeers('chatroom');
+  roomPeers = await client.listPeers('chatroom');
   updatePeerList();
 }
 
 async function sendToRoom(text) {
-  await publish('chatroom', { text });
+  await client.publish('chatroom', { text });
 }
 
 joinRoom();
@@ -1393,15 +1522,15 @@ joinRoom();
 ### Example 3: Direct Messaging with Delivery Confirmation
 
 ```typescript
-import { connect, start, send } from './client.js';
+import { connect } from './client.js';
 
-let myPeerID;
+let client;
 const pendingMessages = new Map();
 
 async function init() {
-  [myPeerID, _] = await connect();
+  client = await connect();
 
-  await start('dm', (peer, data) => {
+  await client.start('dm', (peer, data) => {
     displayDM(peer, data.text);
   });
 }
@@ -1411,11 +1540,14 @@ async function sendDM(peer, text) {
   pendingMessages.set(messageId, { peer, text });
   showMessageAsPending(messageId);
 
-  await send(peer, 'dm', { text }, () => {
-    // Delivery confirmation
+  try {
+    await client.send(peer, 'dm', { text });
+    // Delivery confirmed
     pendingMessages.delete(messageId);
     showMessageAsDelivered(messageId);
-  });
+  } catch (error) {
+    showMessageAsFailed(messageId);
+  }
 }
 
 init();
@@ -1429,18 +1561,25 @@ init();
 import { connect } from './client.js';
 
 async function initWithPersistence() {
-  let peerKey = localStorage.getItem('myPeerKey');
+  const savedKey = localStorage.getItem('myPeerKey');
 
   try {
-    const [peerID, newKey] = await connect(peerKey);
+    const client = await connect({
+      peerKey: savedKey,
+      onClose: () => {
+        console.log('Connection lost');
+        showReconnectUI();
+      }
+    });
 
-    if (!peerKey) {
+    if (!savedKey) {
       // First time, save key
-      localStorage.setItem('myPeerKey', newKey);
+      localStorage.setItem('myPeerKey', client.peerKey);
     }
 
-    console.log('Connected as:', peerID);
-    return peerID;
+    console.log('Connected as:', client.peerID);
+    console.log('Server version:', client.version);
+    return client;
 
   } catch (error) {
     if (error.message.includes('duplicate')) {
@@ -1458,40 +1597,45 @@ initWithPersistence();
 ### Example 5: Multiple Protocols
 
 ```typescript
-import { connect, start, send } from './client.js';
+import { connect } from './client.js';
+
+let client;
 
 async function init() {
-  const [myPeerID, _] = await connect();
+  client = await connect();
 
   // Chat protocol
-  await start('chat', (peer, data) => {
+  await client.start('chat', (peer, data) => {
     displayChatMessage(peer, data);
   });
 
   // Game state protocol
-  await start('game', (peer, data) => {
+  await client.start('game', (peer, data) => {
     updateGameState(peer, data);
   });
 
   // File transfer protocol
-  await start('files', (peer, data) => {
+  await client.start('files', (peer, data) => {
     receiveFileChunk(peer, data);
   });
 }
 
 // Different protocols for different purposes
 async function sendChat(peer, text) {
-  await send(peer, 'chat', { text });
+  await client.send(peer, 'chat', { text });
 }
 
 async function sendGameMove(peer, move) {
-  await send(peer, 'game', { move });
+  await client.send(peer, 'game', { move });
 }
 
 async function sendFile(peer, chunk) {
-  await send(peer, 'files', chunk, () => {
+  try {
+    await client.send(peer, 'files', chunk);
     console.log('Chunk delivered');
-  });
+  } catch (error) {
+    console.error('Chunk delivery failed:', error);
+  }
 }
 
 init();
@@ -1508,4 +1652,4 @@ init();
 
 ---
 
-*Last updated: Initial API documentation from CRC design*
+*Last updated: Updated connect() API to use options object, added version/connected getters*
